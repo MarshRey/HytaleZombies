@@ -1,6 +1,6 @@
 plugins {
 // Uncomment if you are using IntelliJ.
-//  idea
+    idea
     java
     id("com.azuredoom.hytale-tools") version "1.+"
 }
@@ -41,6 +41,28 @@ repositories {
     mavenCentral()
 }
 
+dependencies {
+    // JUnit 5 for unit testing
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.0")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.0")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.0")
+    
+    // Mockito for mocking
+    testImplementation("org.mockito:mockito-core:5.16.1")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.16.1")
+
+    // Force latest ByteBuddy for Java 25 support
+    testImplementation("net.bytebuddy:byte-buddy:1.17.5")
+    testImplementation("net.bytebuddy:byte-buddy-agent:1.17.5")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}
+
 // Uncomment if you are using IntelliJ.
 // idea {
 //     module {
@@ -48,3 +70,4 @@ repositories {
 //         isDownloadJavadoc = true
 //     }
 // }
+
