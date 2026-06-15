@@ -9,6 +9,7 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.task.TaskRegistration;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.commands.HytaleZombieCommand;
 import dev.hytalezombie.config.HytaleZombieConfig;
@@ -373,35 +374,51 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 }
             );
 
-            if (gameSession.getWorld() != null) {
-                loadedMapBounds = MapLoader.placePrefab(
-                    gameSession.getWorld(), loadedMapPrefab, originX, originY, originZ
-                );
-                mapLoaded = true;
-
-                getLogger().at(Level.INFO).log(
-                    "Map placed at ({0},{1},{2}) — bounds: ({3},{4},{5}) to ({6},{7},{8})",
-                    new Object[]{
-                        originX, originY, originZ,
-                        loadedMapBounds.minX, loadedMapBounds.minY, loadedMapBounds.minZ,
-                        loadedMapBounds.maxX, loadedMapBounds.maxY, loadedMapBounds.maxZ
-                    }
-                );
-            } else {
+            if (gameSession.getWorld() == null) {
                 getLogger().at(Level.WARNING).log(
                     "World reference not available yet. Map prefab parsed but not placed. " +
                     "It will be placed automatically when a player joins and the world is available."
                 );
-                // Defer placement to when world is available (first player join)
-                mapLoaded = true; // Mark as loaded so setupDefaultMap uses the bounds
-                // We'll use origin as bounds until placement
+                mapLoaded = true;
                 loadedMapBounds = new MapLoader.PrefabBounds(
                     originX, originY, originZ,
                     originX + loadedMapPrefab.width - 1,
                     originY + loadedMapPrefab.height - 1,
                     originZ + loadedMapPrefab.length - 1
                 );
+                return;
             }
+
+            World world = gameSession.getWorld();
+            MapLoader.PrefabData prefab = loadedMapPrefab;
+
+            // Step 1: Clear the area (replace terrain with air) so the structure IS the world
+            int clearPad = 20; // Extra blocks of clearing beyond the structure
+            getLogger().at(Level.INFO).log("Clearing terrain around structure...");
+
+            MapLoader.clearAreaAsync(world,
+                originX - clearPad, 0, originZ - clearPad,
+                originX + prefab.width + clearPad, originY + prefab.height + clearPad, originZ + prefab.length + clearPad
+            ).thenCompose(v -> {
+                getLogger().at(Level.INFO).log("Terrain cleared. Placing structure blocks...");
+                // Step 2: Place the prefab blocks
+                return MapLoader.placePrefabAsync(world, prefab, originX, originY, originZ);
+            }).thenAccept(bounds -> {
+                loadedMapBounds = bounds;
+                mapLoaded = true;
+                getLogger().at(Level.INFO).log(
+                    "Map placed at ({0},{1},{2}) — bounds: ({3},{4},{5}) to ({6},{7},{8})",
+                    new Object[]{
+                        originX, originY, originZ,
+                        bounds.minX, bounds.minY, bounds.minZ,
+                        bounds.maxX, bounds.maxY, bounds.maxZ
+                    }
+                );
+            }).exceptionally(ex -> {
+                getLogger().at(Level.SEVERE).log("Failed to place map: {0}", ex.getMessage());
+                return null;
+            });
+
         } catch (Exception e) {
             getLogger().at(Level.SEVERE).log("Failed to load map: {0}", e.getMessage());
         }
