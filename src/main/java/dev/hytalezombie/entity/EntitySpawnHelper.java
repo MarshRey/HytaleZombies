@@ -10,12 +10,10 @@ import com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.BoundingBox;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
-import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.PersistentModel;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
-import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.model.Vector3f;
@@ -179,13 +177,9 @@ public class EntitySpawnHelper {
                 // 8. Scale component (optional, 1.0 = normal size)
                 holder.ensureComponent(EntityScaleComponent.getComponentType());
 
-                // 9. Interactions (allows the entity to define interaction types)
-                holder.addComponent(Interactions.getComponentType(), new Interactions());
-
-                // 10. Interactable (required for the entity to be interactable)
-                holder.ensureComponent(Interactable.getComponentType());
-
-                // Add the entity to the world store with proper SPAWN reason
+                // 9. Add the entity to the world store with proper SPAWN reason.
+                // NOTE: Intentionally NOT adding Interactable — zombies are enemies,
+                // not NPCs, and Interactable causes an unwanted "F to interact" prompt.
                 Ref<EntityStore> ref = store.addEntity(holder, AddReason.SPAWN);
                 if (ref == null || !ref.isValid()) {
                     LOGGER.warning("Failed to add zombie entity to the world store.");
@@ -325,13 +319,9 @@ public class EntitySpawnHelper {
                 // 8. Scale component (optional, 1.0 = normal size)
                 holder.ensureComponent(EntityScaleComponent.getComponentType());
 
-                // 9. Interactions (allows the entity to define interaction types)
-                holder.addComponent(Interactions.getComponentType(), new Interactions());
-
-                // 10. Interactable (required for the entity to be interactable)
-                holder.ensureComponent(Interactable.getComponentType());
-
-                // Add the entity to the world store with proper SPAWN reason
+                // 9. Add the entity to the world store with proper SPAWN reason.
+                // NOTE: Intentionally NOT adding Interactable — zombies are enemies,
+                // not NPCs, and Interactable causes an unwanted "F to interact" prompt.
                 Ref<EntityStore> ref = store.addEntity(holder, AddReason.SPAWN);
                 if (ref == null || !ref.isValid()) {
                     LOGGER.warning("Failed to add zombie entity at player's position.");
