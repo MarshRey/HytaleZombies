@@ -2,6 +2,12 @@ package dev.hytalezombie.manager;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
+import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.vector.Rotation3f;
+import com.hypixel.hytale.protocol.MovementStates;
+import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
+import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.physics.component.Velocity;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.config.HytaleZombieConfig;
@@ -59,6 +65,10 @@ public class GameSession {
     // Hytale SDK integration
     private World world;
     private final Map<Integer, String> networkIdToZombieId;
+    private final Map<UUID, String> uuidToZombieId;
+
+    // Player position tracking for zombie AI targeting
+    private final Map<String, Vector3f> playerPositions;
 
     /**
      * Logical representation of a zombie in the game.
@@ -71,10 +81,12 @@ public class GameSession {
         private final float maxHealth;
         private final float speed;
         private final Vector3f spawnPosition;
+        private Vector3f currentPosition;
         private boolean isAlive;
         private boolean isAttackingBarrier;
         private String targetBarrierZone;
         private int networkId;
+        private UUID entityUuid;
         private Ref<EntityStore> entityRef;
 
         public ZombieInstance(String id, float health, float speed, Vector3f spawnPosition) {
@@ -88,6 +100,7 @@ public class GameSession {
             this.maxHealth = health;
             this.speed = speed;
             this.spawnPosition = spawnPosition;
+            this.currentPosition = new Vector3f(spawnPosition.x(), spawnPosition.y(), spawnPosition.z());
             this.isAlive = true;
             this.isAttackingBarrier = false;
             this.targetBarrierZone = null;
@@ -101,11 +114,16 @@ public class GameSession {
         public float getMaxHealth() { return maxHealth; }
         public float getSpeed() { return speed; }
         public Vector3f getSpawnPosition() { return spawnPosition; }
+        public Vector3f getCurrentPosition() { return currentPosition; }
+        public void setCurrentPosition(Vector3f pos) { this.currentPosition = pos; }
         public boolean isAlive() { return isAlive; }
         public boolean isAttackingBarrier() { return isAttackingBarrier; }
         public Optional<String> getTargetBarrierZone() { return Optional.ofNullable(targetBarrierZone); }
         public int getNetworkId() { return networkId; }
         public void setNetworkId(int networkId) { this.networkId = networkId; }
+        @Nullable
+        public UUID getEntityUuid() { return entityUuid; }
+        public void setEntityUuid(@Nullable UUID entityUuid) { this.entityUuid = entityUuid; }
         public Optional<Ref<EntityStore>> getEntityRef() { return Optional.ofNullable(entityRef); }
         public void setEntityRef(@Nullable Ref<EntityStore> entityRef) { this.entityRef = entityRef; }
 
@@ -152,6 +170,8 @@ public class GameSession {
         this.playerPerks = new ConcurrentHashMap<>();
         this.playerWeapons = new ConcurrentHashMap<>();
         this.networkIdToZombieId = new ConcurrentHashMap<>();
+        this.uuidToZombieId = new ConcurrentHashMap<>();
+        this.playerPositions = new ConcurrentHashMap<>();
     }
 
     // ==================== MATCH LIFECYCLE ====================
@@ -220,6 +240,9 @@ public class GameSession {
             handleSpawning();
         }
 
+        // Run zombie AI (movement toward players)
+        tickZombieAI();
+
         // Check round completion
         checkRoundComplete();
     }
@@ -283,24 +306,200 @@ public class GameSession {
         float health = roundManager.getScaledZombieHealth();
         float speed = roundManager.getScaledZombieSpeed();
         String zombieId = "zombie_" + tickCounter + "_" + UUID.randomUUID().toString().substring(0, 8);
+        UUID entityUuid = UUID.randomUUID();
 
         ZombieInstance zombie = new ZombieInstance(zombieId, health, speed, position);
+        zombie.setEntityUuid(entityUuid);
+
+        // Register the UUID mapping IMMEDIATELY (before the async entity spawn)
+        // This ensures ZombieDamageEventSystem can always find this zombie via UUID,
+        // even if damage arrives before the async callback sets the networkId mapping.
+        uuidToZombieId.put(entityUuid, zombieId);
 
         // Attempt to spawn a real Hytale entity if we have a world reference
         if (world != null) {
-            EntitySpawnHelper.SpawnResult result = EntitySpawnHelper.spawnZombie(world, position);
-            if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
-                zombie.setNetworkId(result.networkId());
-                zombie.setEntityRef(result.entityRef());
-                networkIdToZombieId.put(result.networkId(), zombieId);
-                LOGGER.log(Level.FINE, "Spawned real Hytale zombie entity (networkId={0}) for {1}",
-                        new Object[]{result.networkId(), zombieId});
-            } else {
-                LOGGER.log(Level.WARNING, "Failed to spawn Hytale entity for zombie {0} — created logical-only", zombieId);
-            }
+            // spawnZombie is now async (enqueued on world thread via world.execute()).
+            // Pass the pre-generated UUID so the entity's UUIDComponent matches our mapping.
+            EntitySpawnHelper.spawnZombie(world, position, EntitySpawnHelper.getRandomZombieModel(), entityUuid)
+                .thenAccept(result -> {
+                    if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
+                        zombie.setNetworkId(result.networkId());
+                        zombie.setEntityRef(result.entityRef());
+                        networkIdToZombieId.put(result.networkId(), zombieId);
+                        LOGGER.log(Level.FINE, "Spawned real Hytale zombie entity (networkId={0}) for {1}",
+                                new Object[]{result.networkId(), zombieId});
+                    } else {
+                        LOGGER.log(Level.WARNING, "Failed to spawn Hytale entity for zombie {0} - created logical-only", zombieId);
+                    }
+                })
+                .exceptionally(ex -> {
+                    LOGGER.log(Level.WARNING, "Error spawning Hytale entity for zombie {0}: {1}",
+                            new Object[]{zombieId, ex.getMessage()});
+                    return null;
+                });
         }
 
         return zombie;
+    }
+
+    /**
+     * Runs AI movement for all active zombies each tick.
+     * Moves each zombie toward the nearest target point at its current speed.
+     * Updates both logical position and the Hytale entity's TransformComponent.
+     */
+    /** Ticks between world position syncs to reduce world thread load. */
+    private static final int AI_SYNC_INTERVAL = 5;
+
+    /** Target point for zombies to move toward (will be replaced with nearest player). */
+    private static final Vector3f DEFAULT_AI_TARGET = new Vector3f(0, 0, 0);
+
+    private int aiSyncCounter;
+
+    private void tickZombieAI() {
+        if (activeZombies.isEmpty()) return;
+
+        aiSyncCounter++;
+
+        // Determine target point: use nearest player if available,
+        // fall back to default (world origin)
+        Vector3f targetPoint = DEFAULT_AI_TARGET;
+
+        // Process logical movement for all active zombies
+        float tickSpeed = 1.0f / 20.0f;
+
+        for (ZombieInstance zombie : activeZombies.values()) {
+            if (!zombie.isAlive()) continue;
+
+            // Find the nearest player to this zombie
+            Vector3f nearestTarget = targetPoint;
+            float nearestDistSq = Float.MAX_VALUE;
+            Vector3f zombiePos = zombie.getCurrentPosition();
+
+            for (Map.Entry<String, Vector3f> playerEntry : playerPositions.entrySet()) {
+                Vector3f playerPos = playerEntry.getValue();
+                float pdx = playerPos.x() - zombiePos.x();
+                float pdz = playerPos.z() - zombiePos.z();
+                float distSq = pdx * pdx + pdz * pdz;
+                if (distSq < nearestDistSq) {
+                    nearestDistSq = distSq;
+                    nearestTarget = playerPos;
+                }
+            }
+
+            // Move toward the nearest target
+            float dx = nearestTarget.x() - zombiePos.x();
+            float dz = nearestTarget.z() - zombiePos.z();
+            float dist = (float) Math.sqrt(dx * dx + dz * dz);
+
+            if (dist < 0.5f) continue;
+
+            float moveAmount = zombie.getSpeed() * tickSpeed;
+            float nx = dx / dist * moveAmount;
+            float nz = dz / dist * moveAmount;
+
+            if (nx * nx + nz * nz > dist * dist) {
+                zombie.setCurrentPosition(new Vector3f(nearestTarget.x(), zombiePos.y(), nearestTarget.z()));
+            } else {
+                zombie.setCurrentPosition(new Vector3f(zombiePos.x() + nx, zombiePos.y(), zombiePos.z() + nz));
+            }
+        }
+
+        // Sync velocities and movement states to Hytale entities on the world thread.
+        // Only sync every AI_SYNC_INTERVAL ticks to avoid saturating the world thread.
+        // Uses Velocity component + MovementStates instead of teleportPosition() so that
+        // Hytale's physics system handles gravity, collision, and smooth movement.
+        if (world != null && aiSyncCounter % AI_SYNC_INTERVAL == 0) {
+            // Snapshot the map to avoid concurrent modification issues
+            final Map<String, ZombieInstance> snapshot = new HashMap<>(activeZombies);
+            // Capture player positions for target computation on the world thread
+            final Map<String, Vector3f> playerPosSnapshot = new HashMap<>(playerPositions);
+            world.execute(() -> {
+                for (ZombieInstance zombie : snapshot.values()) {
+                    if (!zombie.isAlive()) continue;
+                    try {
+                        zombie.getEntityRef().ifPresent(ref -> {
+                            if (!ref.isValid()) return;
+                            Store<EntityStore> store = ref.getStore();
+
+                            // Find nearest player target for this zombie
+                            Vector3f target = DEFAULT_AI_TARGET;
+                            float nearestDistSq = Float.MAX_VALUE;
+                            Vector3f zombiePos = zombie.getCurrentPosition();
+
+                            for (Map.Entry<String, Vector3f> playerEntry : playerPosSnapshot.entrySet()) {
+                                Vector3f playerPos = playerEntry.getValue();
+                                float pdx = playerPos.x() - zombiePos.x();
+                                float pdz = playerPos.z() - zombiePos.z();
+                                float distSq = pdx * pdx + pdz * pdz;
+                                if (distSq < nearestDistSq) {
+                                    nearestDistSq = distSq;
+                                    target = playerPos;
+                                }
+                            }
+
+                            // Compute direction toward target
+                            float dx = target.x() - zombiePos.x();
+                            float dz = target.z() - zombiePos.z();
+                            float dist = (float) Math.sqrt(dx * dx + dz * dz);
+
+                            if (dist >= 0.5f) {
+                                float nx = dx / dist;
+                                float nz = dz / dist;
+
+                                // Set Velocity component (blocks per second) so Hytale physics
+                                // handles movement properly with gravity and collision
+                                com.hypixel.hytale.server.core.modules.physics.component.Velocity velocity =
+                                    store.getComponent(ref, com.hypixel.hytale.server.core.modules.physics.component.Velocity.getComponentType());
+                                if (velocity != null) {
+                                    float speed = zombie.getSpeed();
+                                    velocity.set(nx * speed, velocity.getY(), nz * speed);
+                                }
+
+                                // Update MovementStates so the entity animates and behaves
+                                // like a walking zombie (not idle/frozen)
+                                com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent movementStatesComp =
+                                    store.getComponent(ref, com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent.getComponentType());
+                                if (movementStatesComp != null) {
+                                    com.hypixel.hytale.protocol.MovementStates states = movementStatesComp.getMovementStates();
+                                    states.walking = true;
+                                    states.running = zombie.getSpeed() > 1.5f;
+                                    states.idle = false;
+                                    states.horizontalIdle = false;
+                                }
+
+                                // Set rotation so the zombie faces its target
+                                TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+                                if (transform != null) {
+                                    float yaw = (float) Math.toDegrees(Math.atan2(-dx, -dz));
+                                    transform.setRotation(new com.hypixel.hytale.math.vector.Rotation3f(0, yaw, 0));
+                                }
+                            } else {
+                                // Close enough - set idle
+                                com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent movementStatesComp =
+                                    store.getComponent(ref, com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent.getComponentType());
+                                if (movementStatesComp != null) {
+                                    com.hypixel.hytale.protocol.MovementStates states = movementStatesComp.getMovementStates();
+                                    states.walking = false;
+                                    states.idle = true;
+                                    states.horizontalIdle = true;
+                                }
+                            }
+
+                            // Sync logical position from the actual Hytale transform
+                            // (so gravity/collision effects are reflected in game logic)
+                            TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+                            if (transform != null) {
+                                org.joml.Vector3d actualPos = transform.getPosition();
+                                zombie.setCurrentPosition(new Vector3f(
+                                    (float) actualPos.x(), (float) actualPos.y(), (float) actualPos.z()));
+                            }
+                        });
+                    } catch (Exception e) {
+                        // Entity may have been removed— safe to skip
+                    }
+                }
+            });
+        }
     }
 
     /**
@@ -346,16 +545,15 @@ public class GameSession {
             roundManager.decrementActiveZombies();
             zombiesKilledThisRound++;
 
-            // Remove the Hytale entity from the world if it was spawned
-            if (world != null) {
-                zombie.getEntityRef().ifPresent(ref -> {
-                    if (ref.isValid()) {
-                        world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE);
-                    }
-                });
-                if (zombie.getNetworkId() >= 0) {
-                    networkIdToZombieId.remove(zombie.getNetworkId());
-                }
+            // Clean up UUID and networkId mappings.
+            // Entity removal is deferred to the damage event system
+            // (ZombieDamageEventSystem) which uses CommandBuffer for safe
+            // entity removal during ECS iteration.
+            if (zombie.getEntityUuid() != null) {
+                uuidToZombieId.remove(zombie.getEntityUuid());
+            }
+            if (zombie.getNetworkId() >= 0) {
+                networkIdToZombieId.remove(zombie.getNetworkId());
             }
 
             // Award points
@@ -397,17 +595,39 @@ public class GameSession {
             }
         }
 
-        // Remove all Hytale entities from the world
+        // Clean up all UUID mappings
+        for (ZombieInstance zombie : activeZombies.values()) {
+            if (zombie.getEntityUuid() != null) {
+                uuidToZombieId.remove(zombie.getEntityUuid());
+            }
+        }
+
+        // Remove all Hytale entities from the world.
+        // Collect entity refs first, then defer removal to the world thread
+        // via world.execute() to avoid calling removeEntity() from the
+        // game loop thread (which can cause thread-safety issues).
         if (world != null) {
+            java.util.List<Ref<EntityStore>> refsToRemove = new java.util.ArrayList<>();
             for (ZombieInstance zombie : activeZombies.values()) {
                 zombie.getEntityRef().ifPresent(ref -> {
                     if (ref.isValid()) {
-                        world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE);
+                        refsToRemove.add(ref);
                     }
                 });
                 if (zombie.getNetworkId() >= 0) {
                     networkIdToZombieId.remove(zombie.getNetworkId());
                 }
+            }
+            if (!refsToRemove.isEmpty()) {
+                world.execute(() -> {
+                    com.hypixel.hytale.component.Store<EntityStore> store =
+                        world.getEntityStore().getStore();
+                    for (Ref<EntityStore> ref : refsToRemove) {
+                        if (ref.isValid()) {
+                            store.removeEntity(ref, RemoveReason.REMOVE);
+                        }
+                    }
+                });
             }
         }
 
@@ -513,7 +733,11 @@ public class GameSession {
                 && zombiesSpawnedThisRound >= totalZombiesToSpawn
                 && activeZombies.isEmpty()) {
             LOGGER.log(Level.INFO, "Round {0} complete!", roundManager.getCurrentRound());
-            // The round manager auto-advances via decrementActiveZombies
+            // Advance to the next round and prepare its spawns
+            roundManager.advanceRound();
+            prepareRoundSpawns();
+            LOGGER.log(Level.INFO, "Round {0} has begun!",
+                    roundManager.getCurrentRound());
         }
     }
 
@@ -628,6 +852,14 @@ public class GameSession {
     // ==================== ZOMBIE SPAWN CONTROL ====================
 
     /**
+     * Returns the RoundManager for accessing round/scaling data.
+     */
+    @Nonnull
+    public RoundManager getRoundManager() {
+        return roundManager;
+    }
+
+    /**
      * Gets the total number of zombies to spawn this round.
      */
     public int getTotalZombiesToSpawn() {
@@ -665,6 +897,21 @@ public class GameSession {
     // ==================== HYTALE SDK INTEGRATION ====================
 
     /**
+     * Updates a player's position for zombie AI targeting.
+     * Called periodically from the plugin's game loop.
+     */
+    public void updatePlayerPosition(@Nonnull String playerId, @Nonnull Vector3f position) {
+        playerPositions.put(playerId, position);
+    }
+
+    /**
+     * Removes a player's tracked position when they disconnect.
+     */
+    public void removePlayerPosition(@Nonnull String playerId) {
+        playerPositions.remove(playerId);
+    }
+
+    /**
      * Sets the Hytale World reference for entity spawning.
      * Set this when the first player joins (from {@code PlayerReadyEvent}).
      */
@@ -687,6 +934,16 @@ public class GameSession {
     @Nonnull
     public Optional<String> getZombieIdByNetworkId(int networkId) {
         return Optional.ofNullable(networkIdToZombieId.get(networkId));
+    }
+
+    /**
+     * Looks up a zombie's logical ID by its UUID (set synchronously during creation).
+     * Used by {@code ZombieDamageEventSystem} to route damage events reliably,
+     * avoiding the async race condition of networkId-based lookup.
+     */
+    @Nonnull
+    public Optional<String> getZombieIdByUuid(@Nonnull UUID uuid) {
+        return Optional.ofNullable(uuidToZombieId.get(uuid));
     }
 
     /**
@@ -716,6 +973,39 @@ public class GameSession {
         zombiesSpawnedThisRound++;
 
         LOGGER.log(Level.FINE, "Manually spawned zombie {0} at {1} from zone {2}",
+                new Object[]{zombie.getId(), position, node.getZoneId()});
+        return Optional.of(zombie);
+    }
+
+    /**
+     * Spawns a test zombie into the world without modifying round state.
+     * Used by /hz spawnzombie when no match is active, for testing entity spawning.
+     * The zombie is tracked in activeZombies but does NOT affect:
+     *   - roundManager active zombie count
+     *   - zombiesSpawnedThisRound counter
+     *   - round auto-advancement
+     * @param zoneId the zone to spawn from, or null for a random occupied zone
+     * @return the spawned zombie, or empty if no spawn nodes available
+     */
+    @Nonnull
+    public Optional<ZombieInstance> spawnTestZombie(@Nullable String zoneId) {
+        Optional<SpawnNode> nodeOpt;
+        if (zoneId != null) {
+            List<SpawnNode> nodes = spawnManager.getNodesInZone(zoneId);
+            if (nodes.isEmpty()) return Optional.empty();
+            nodeOpt = Optional.of(nodes.get(new Random().nextInt(nodes.size())));
+        } else {
+            nodeOpt = spawnManager.getRandomSpawnNode();
+        }
+
+        if (nodeOpt.isEmpty()) return Optional.empty();
+
+        SpawnNode node = nodeOpt.get();
+        Vector3f position = spawnManager.getRandomizedPosition(node);
+        ZombieInstance zombie = createZombie(position);
+        activeZombies.put(zombie.getId(), zombie);
+
+        LOGGER.log(Level.INFO, "Test-spawned zombie {0} at {1} from zone {2} (no round tracking)",
                 new Object[]{zombie.getId(), position, node.getZoneId()});
         return Optional.of(zombie);
     }

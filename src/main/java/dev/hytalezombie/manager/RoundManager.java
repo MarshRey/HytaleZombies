@@ -128,9 +128,6 @@ public class RoundManager {
 
     public void decrementActiveZombies() {
         this.activeZombieCount = Math.max(0, this.activeZombieCount - 1);
-        // Auto-advance when all zombies are eliminated
-        if (matchActive && this.activeZombieCount <= 0) {
-            advanceRound();
-        }
+        // Auto-advance is now handled by GameSession.checkRoundComplete()
     }
 }

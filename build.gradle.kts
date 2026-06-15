@@ -49,6 +49,7 @@ dependencies {
     
     // Mockito for mocking
     testImplementation("org.mockito:mockito-core:5.16.1")
+    testRuntimeOnly("com.hypixel.hytale:Server:0.+")
     testImplementation("org.mockito:mockito-junit-jupiter:5.16.1")
 
     // Force latest ByteBuddy for Java 25 support

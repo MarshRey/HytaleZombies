@@ -2,6 +2,7 @@ package dev.hytalezombie.entity;
 
 import com.hypixel.hytale.component.ArchetypeChunk;
 import com.hypixel.hytale.component.CommandBuffer;
+import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.query.Query;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
@@ -75,14 +76,18 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
         ZombieEntity zombie = chunk.getComponent(index, ZombieEntity.getComponentType());
         if (zombie == null) return;
 
-        int networkId = zombie.getNetworkId();
+        // Use the UUID component for reliable lookup (set synchronously during spawn,
+        // avoiding the async race condition of networkId-based lookup).
+        UUIDComponent uuidComp = chunk.getComponent(index, UUIDComponent.getComponentType());
+        if (uuidComp == null) return;
 
-        // Look up the logical zombie ID from the game session
-        String zombieId = gameSession.getZombieIdByNetworkId(networkId).orElse(null);
+        String zombieId = gameSession.getZombieIdByUuid(uuidComp.getUuid()).orElse(null);
         if (zombieId == null) {
             // Zombie not tracked by our game session (might be from another plugin or test)
             return;
         }
+
+        int networkId = zombie.getNetworkId();
 
         float damageAmount = damage.getAmount();
 
@@ -94,9 +99,9 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
             Ref<EntityStore> attackerRef = entitySource.getRef();
             if (attackerRef.isValid()) {
                 try {
-                    UUIDComponent uuidComp = store.getComponent(attackerRef, UUIDComponent.getComponentType());
-                    if (uuidComp != null) {
-                        attackerPlayerId = uuidComp.getUuid().toString();
+                    UUIDComponent attackerUuidComp = store.getComponent(attackerRef, UUIDComponent.getComponentType());
+                    if (attackerUuidComp != null) {
+                        attackerPlayerId = attackerUuidComp.getUuid().toString();
                     }
                 } catch (Exception e) {
                     LOGGER.log(Level.FINE, "Could not resolve attacker UUID for damage to zombie {0}: {1}",
@@ -112,6 +117,12 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
         boolean killed = gameSession.damageZombie(zombieId, damageAmount, resolvedPlayerId);
 
         if (killed) {
+            // Use CommandBuffer for safe entity removal during ECS iteration.
+            // This avoids concurrent modification of the entity store that would
+            // occur if removeEntity() were called directly during system execution.
+            Ref<EntityStore> entityRef = chunk.getReferenceTo(index);
+            buffer.removeEntity(entityRef, RemoveReason.REMOVE);
+
             LOGGER.log(Level.FINE, "ZombieDamageEventSystem: zombie {0} (networkId={1}) killed by player {2}",
                     new Object[]{zombieId, networkId, resolvedPlayerId});
         }

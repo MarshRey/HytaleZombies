@@ -1,11 +1,15 @@
 package dev.hytalezombie;
 
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandRegistry;
 import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
+import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.task.TaskRegistration;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.commands.HytaleZombieCommand;
 import dev.hytalezombie.config.HytaleZombieConfig;
 import dev.hytalezombie.entity.ZombieDamageEventSystem;
@@ -17,7 +21,9 @@ import dev.hytalezombie.spawn.SpawnNode;
 
 import javax.annotation.Nonnull;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -37,13 +43,18 @@ public class HytaleZombiePlugin extends JavaPlugin {
     private BarrierManager barrierManager;
     private SpawnManager spawnManager;
     private DebugManager debugManager;
+    private ScoreboardManager scoreboardManager;
 
     // Game session orchestrator
     private GameSession gameSession;
 
+    // Player entity refs for position tracking (playerId -> entityRef)
+    private final Map<String, Ref<EntityStore>> playerEntityRefs;
+
     // Game loop scheduling
     private ScheduledExecutorService gameLoopExecutor;
     private TaskRegistration gameLoopTask;
+    private int positionUpdateCounter;
 
     /**
      * Constructor called by Hytale's plugin system via JavaPluginInit.
@@ -51,6 +62,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
     public HytaleZombiePlugin(JavaPluginInit init) {
         super(init);
         this.config = new HytaleZombieConfig();
+        this.playerEntityRefs = new ConcurrentHashMap<>();
     }
 
     /**
@@ -77,6 +89,9 @@ public class HytaleZombiePlugin extends JavaPlugin {
             spawnManager
         );
 
+        // Initialize the scoreboard manager for HUD updates
+        this.scoreboardManager = new ScoreboardManager(gameSession, playerDataManager);
+
         getLogger().at(Level.INFO).log("HytaleZombie initialization complete.");
         return CompletableFuture.completedFuture(null);
     }
@@ -84,7 +99,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
     /**
      * Called during plugin setup, before {@link #start()}.
      * Register entity types, components, and systems here.
-     * The plugin state is {@code SETUP} at this point — commands/events
+     * The plugin state is {@code SETUP} at this point ??? commands/events
      * should still be registered in {@link #start()} (state is {@code ENABLED}).
      */
     @Override
@@ -147,15 +162,22 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 }
 
                 playerDataManager.getOrCreatePlayerData(playerId);
+                // Store the player's entity ref for position tracking
+                playerEntityRefs.put(playerId, event.getPlayerRef());
                 // Send welcome message using PlayerRef from the store
                 com.hypixel.hytale.server.core.universe.PlayerRef playerRef = 
                     event.getPlayerRef().getStore()
                         .getComponent(event.getPlayerRef(), com.hypixel.hytale.server.core.universe.PlayerRef.getComponentType());
                 if (playerRef != null) {
+                    // Register the player in the scoreboard manager
+                    scoreboardManager.registerPlayer(playerId, playerRef);
                     playerRef.sendMessage(
                         Message.raw("[HytaleZombie] Welcome! Type /hytalezombie for help.")
                     );
                 }
+
+                // Initial position update for zombie AI targeting
+                updatePlayerPositionFromECS(playerId, event.getPlayerRef());
             }
         );
 
@@ -187,6 +209,12 @@ public class HytaleZombiePlugin extends JavaPlugin {
                         if (gameSession != null && gameSession.isSessionActive()) {
                             gameSession.tick();
                         }
+                        // Always tick the scoreboard (sends updates even between matches)
+                        if (scoreboardManager != null) {
+                            scoreboardManager.tick();
+                        }
+                        // Periodically update player positions for zombie AI targeting
+                        tickPlayerPositionUpdates();
                     } catch (Exception e) {
                         getLogger().at(Level.WARNING).log(
                             "Error in game loop tick: {0}", e.getMessage()
@@ -201,52 +229,57 @@ public class HytaleZombiePlugin extends JavaPlugin {
     }
 
     /**
+     * How many game ticks between player position updates for zombie AI.
+     * Higher = less frequent reads from the ECS (saves world thread time).
+     */
+    private static final int POSITION_UPDATE_INTERVAL = 10; // 2 updates per second
+
+    /**
+     * Periodically reads player positions from the ECS and forwards them
+     * to GameSession for zombie AI targeting.
+     */
+    private void tickPlayerPositionUpdates() {
+        positionUpdateCounter++;
+        if (positionUpdateCounter < POSITION_UPDATE_INTERVAL) return;
+        positionUpdateCounter = 0;
+
+        if (playerEntityRefs.isEmpty() || gameSession == null) return;
+
+        // Read positions on the world thread
+        for (Map.Entry<String, Ref<EntityStore>> entry : playerEntityRefs.entrySet()) {
+            updatePlayerPositionFromECS(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /**
+     * Reads a single player's position from the ECS and updates GameSession.
+     */
+    private void updatePlayerPositionFromECS(String playerId, Ref<EntityStore> playerRef) {
+        if (playerRef == null || !playerRef.isValid()) return;
+        try {
+            Store<EntityStore> store = playerRef.getStore();
+            TransformComponent transform = store.getComponent(playerRef, TransformComponent.getComponentType());
+            if (transform != null) {
+                org.joml.Vector3d pos = transform.getPosition();
+                gameSession.updatePlayerPosition(playerId,
+                    new Vector3f((float) pos.x(), (float) pos.y(), (float) pos.z()));
+            }
+        } catch (Exception e) {
+            getLogger().at(Level.FINE).log("Could not read player position for {0}: {1}",
+                playerId, e.getMessage());
+        }
+    }
+
+    /**
      * Sets up a default test map with basic zones, spawn nodes, and barriers.
      * Call this after starting a match to have a playable layout.
      */
     public void setupDefaultMap() {
-        // This would typically load from config, but for testing we hardcode a layout
-        
-        // Mark the starting zone as occupied so zombies spawn there
+        // No default spawn nodes - players place their own with /hz setspawn.
+        // Mark the starting zone as occupied so zombies spawn there once nodes are added.
         spawnManager.markZoneOccupied("spawn_room");
 
-        // Register some spawn nodes in the starting zone
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "spawn_room", new Vector3f(0, 0, 0), 5.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "spawn_room", new Vector3f(10, 0, 10), 5.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "spawn_room", new Vector3f(-10, 0, -10), 5.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "spawn_room", new Vector3f(5, 0, -15), 4.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "spawn_room", new Vector3f(-15, 0, 5), 4.0f
-        ));
-
-        // Additional zone: room_2 (further out, more spawns)
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "room_2", new Vector3f(30, 0, 30), 6.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "room_2", new Vector3f(40, 0, 20), 6.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "room_2", new Vector3f(25, 0, 40), 6.0f
-        ));
-
-        // Additional zone: open_area (wider spread)
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "open_area", new Vector3f(-30, 0, -30), 8.0f
-        ));
-        spawnManager.registerSpawnNode(new SpawnNode(
-            "open_area", new Vector3f(-50, 0, -50), 8.0f
-        ));
-
-        getLogger().at(Level.INFO).log("Default test map with spawn nodes has been set up.");
+        getLogger().at(Level.INFO).log("Default map zone marked. No spawn nodes registered - use /hz setspawn to place your own.");
     }
 
     /**
@@ -296,6 +329,10 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
     public GameSession getGameSession() {
         return gameSession;
+    }
+
+    public ScoreboardManager getScoreboardManager() {
+        return scoreboardManager;
     }
 
     public void setSpawnManager(SpawnManager spawnManager) {

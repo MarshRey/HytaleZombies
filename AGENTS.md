@@ -28,11 +28,11 @@ The **core game logic is fully implemented at the logical/game-engine level** wi
 
 ---
 
-## 🎯 The Goal: A Simple Round of Zombies (Already Achieved in Code)
+## ?? The Goal: A Simple Round of Zombies (Already Achieved in Code)
 
 ### What counts as a "basic round"?
 
-1. **Three spawn points** exist in the map (all in one zone, e.g. `"spawn_room"`)
+1. **Spawn points** are placed by you with `/hz setspawn` (no default coordinates)
 2. When `/hytalezombie start` is run, round 1 begins
 3. **Zombies spawn one at a time** at a configurable interval (default: every 2 seconds / 40 ticks)
 4. Each zombie spawns at **one of the three spawn points** (chosen randomly), at a **randomized offset** within that node's radius
@@ -44,13 +44,13 @@ The **core game logic is fully implemented at the logical/game-engine level** wi
 
 ---
 
-## 🔁 How the Spawning Cycle Works (End-to-End Walkthrough)
+## ?? How the Spawning Cycle Works (End-to-End Walkthrough)
 
 Here is the complete flow from server start to round completion, with every relevant file cited:
 
 ### Step 1: Plugin Initialization
 
-**`HytaleZombiePlugin.java`** — lifecycle methods:
+**`HytaleZombiePlugin.java`** ? lifecycle methods:
 
 ```
 preLoad():  Creates RoundManager, PlayerDataManager, BarrierManager, SpawnManager, GameSession
@@ -59,58 +59,58 @@ preLoad():  Creates RoundManager, PlayerDataManager, BarrierManager, SpawnManage
 start():    Registers /hytalezombie command via CommandRegistry
             Starts a 20-tick-per-second game loop (ScheduledExecutorService, 50ms intervals)
             Registers PlayerReadyEvent handler to greet players + create PlayerData
-            (runs when plugin is ENABLED — commands/events cannot be registered earlier)
+            (runs when plugin is ENABLED ? commands/events cannot be registered earlier)
 ```
 
 ### Step 2: Admin Starts the Game
 
-**`HytaleZombieCommand.java`** — `execute("start")`:
+**`HytaleZombieCommand.java`** ? `execute("start")`:
 
 ```
-plugin.setupDefaultMap()        → registers 3+ spawn points
-session.startMatch()            → roundManager.startMatch() → round=1, match active
-session.prepareRoundSpawns()    → calculates total zombies for round 1
+plugin.setupDefaultMap()        ? marks spawn_room zone (add spawns with /hz setspawn)
+session.startMatch()            ? roundManager.startMatch() ? round=1, match active
+session.prepareRoundSpawns()    ? calculates total zombies for round 1
 ```
 
-The `setupDefaultMap()` call mimics what you'd do manually with `/hz setspawn` commands. For custom maps, you can use `/hz map` to load defaults or `/hz setspawn <zone> <x> <y> <z>` to place spawns at specific world coordinates.
+`setupDefaultMap()` marks spawn_room zone only. Use `/hz setspawn` commands. For custom maps, you can `/hz setspawn <zone> <x> <y> <z>` to place spawns at specific world coordinates.
 
 ### Step 3: The Game Loop Ticks (20 times per second)
 
-**`GameSession.java`** — `tick()` (called every 50ms):
+**`GameSession.java`** ? `tick()` (called every 50ms):
 
 ```
-if !sessionActive → return
+if !sessionActive ? return
 tickCounter++
-tickPowerUps()              → countdown active power-up timers
-handleSpawning()            → spawn a zombie if interval has elapsed (see Step 4)
-checkRoundComplete()        → advance round if all done (see Step 5)
+tickPowerUps()              ? countdown active power-up timers
+handleSpawning()            ? spawn a zombie if interval has elapsed (see Step 4)
+checkRoundComplete()        ? advance round if all done (see Step 5)
 ```
 
 ### Step 4: Zombie Spawning
 
-**`GameSession.java`** — `handleSpawning()`:
+**`GameSession.java`** ? `handleSpawning()`:
 
 ```
-if zombiesSpawnedThisRound >= totalZombiesToSpawn → return (all done)
+if zombiesSpawnedThisRound >= totalZombiesToSpawn ? return (all done)
 
 if spawnTicker < spawnDelayTicks (default 40):
-    spawnTicker++             → waiting for the interval
+    spawnTicker++             ? waiting for the interval
     return
 
-spawnTicker = 0               → reset the interval counter
+spawnTicker = 0               ? reset the interval counter
 
 // Pick one of the 3 spawn points at random
 spawnManager.getRandomSpawnNode()
-    → returns a SpawnNode (picks randomly from Node A, Node B, Node C)
+    ? returns a SpawnNode (picks randomly from Node A, Node B, Node C)
 
 // Calculate a randomized position within that node's spawn radius
 position = spawnManager.getRandomizedPosition(node)
-    → random X/Z offset within node.radius, maintains Y level
+    ? random X/Z offset within node.radius, maintains Y level
 
 // Create the zombie with stats scaled to current round
 ZombieInstance zombie = createZombie(position)
-    → health = roundManager.getScaledZombieHealth()   (100.0 * 1.15^(round-1))
-    → speed  = roundManager.getScaledZombieSpeed()    (1.0 * 1.05^(round-1))
+    ? health = roundManager.getScaledZombieHealth()   (100.0 * 1.15^(round-1))
+    ? speed  = roundManager.getScaledZombieSpeed()    (1.0 * 1.05^(round-1))
 
 activeZombies.put(zombie.getId(), zombie)
 roundManager.incrementActiveZombies()
@@ -119,20 +119,20 @@ zombiesSpawnedThisRound++
 
 ### Step 5: Round Completion
 
-**`GameSession.java`** — `checkRoundComplete()`:
+**`GameSession.java`** ? `checkRoundComplete()`:
 
 ```
 checkRoundComplete():
     if all zombies spawned AND all zombies eliminated (activeZombies.isEmpty()):
-        → auto-advance happens in RoundManager.decrementActiveZombies()
-        → when activeZombieCount hits 0 → advanceRound() → round increments
+        ? auto-advance happens in RoundManager.decrementActiveZombies()
+        ? when activeZombieCount hits 0 ? advanceRound() ? round increments
 ```
 
 ---
 
-## 📍 The Three Spawn Points (Defined in Code)
+## ?? The Three Spawn Points (Defined in Code)
 
-**`HytaleZombiePlugin.java`** — `setupDefaultMap()`:
+**`HytaleZombiePlugin.java`** ? `setupDefaultMap()`:
 
 ```java
 spawnManager.markZoneOccupied("spawn_room");
@@ -154,60 +154,60 @@ spawnManager.registerSpawnNode(new SpawnNode(
 **How each spawn point works:**
 - All three belong to zone `"spawn_room"` (marked as occupied so zombies spawn from here)
 - Each has a **position** (the XYZ coordinate in your Hytale world)
-- Each has a **spawnRadius** of 5.0 — a zombie spawns at a **random offset** (up to 5 blocks away in X/Z) from the node's center position
+- Each has a **spawnRadius** of 5.0 ? a zombie spawns at a **random offset** (up to 5 blocks away in X/Z) from the node's center position
 - Selection is random: `SpawnManager.getRandomSpawnNode()` picks uniformly from all active nodes
 
 **To change these positions**, edit `setupDefaultMap()` in `HytaleZombiePlugin.java` and set the Vector3f values to your desired world coordinates.
 
 ---
 
-## ⏱ Spawn Interval Controls
+## ? Spawn Interval Controls
 
 The `spawnDelayTicks` in `HytaleZombieConfig.java` controls the time between each zombie spawn:
 
 | `spawnDelayTicks` | Real Time | Effect |
 |---|---|---|
-| **40** (default) | **2 seconds** | Standard pace (20 ticks/sec × 40 = 2000ms) |
+| **40** (default) | **2 seconds** | Standard pace (20 ticks/sec ? 40 = 2000ms) |
 | **20** | **1 second** | Fast pace |
 | 60 | 3 seconds | Slow pace (harder because zombies build up) |
 | 10 | 0.5 seconds | Very fast, intense |
-| 1 | 0.05 seconds | Nearly instant — all zombies flood out immediately |
+| 1 | 0.05 seconds | Nearly instant ? all zombies flood out immediately |
 
 The spawn ticker is an internal counter that increments by 1 each `tick()` call. When it reaches `spawnDelayTicks`, one zombie is spawned and the ticker resets to 0.
 
 ---
 
-## 📊 Zombie Count & Scaling Formulas
+## ?? Zombie Count & Scaling Formulas
 
 ### Zombies Per Round
 
 Calculated in **`RoundManager.getSpawnCount(playerCount)`**:
 
 ```
-totalZombies = ZombieSpawnBaseCount(5) + (ZombiesPerPlayer(2) × playerCount) + (currentRound × 2)
+totalZombies = ZombieSpawnBaseCount(5) + (ZombiesPerPlayer(2) ? playerCount) + (currentRound ? 2)
 ```
 
 **Examples (1 player):**
 | Round | Calculation | Zombies |
 |-------|-------------|---------|
-| 1 | 5 + (2×1) + (1×2) | **9** |
-| 2 | 5 + (2×1) + (2×2) | **11** |
-| 5 | 5 + (2×1) + (5×2) | **17** |
-| 10 | 5 + (2×1) + (10×2) | **27** |
+| 1 | 5 + (2?1) + (1?2) | **9** |
+| 2 | 5 + (2?1) + (2?2) | **11** |
+| 5 | 5 + (2?1) + (5?2) | **17** |
+| 10 | 5 + (2?1) + (10?2) | **27** |
 
 **Examples (4 players):**
 | Round | Calculation | Zombies |
 |-------|-------------|---------|
-| 1 | 5 + (2×4) + (1×2) | **15** |
-| 5 | 5 + (2×4) + (5×2) | **23** |
-| 10 | 5 + (2×4) + (10×2) | **33** |
+| 1 | 5 + (2?4) + (1?2) | **15** |
+| 5 | 5 + (2?4) + (5?2) | **23** |
+| 10 | 5 + (2?4) + (10?2) | **33** |
 
 ### Zombie Health Scaling
 
 Calculated in **`RoundManager.getScaledZombieHealth()`**:
 
 ```
-health = baseHealth(100) × (healthScalingPerRound(1.15))^(round-1)
+health = baseHealth(100) ? (healthScalingPerRound(1.15))^(round-1)
 ```
 
 | Round | HP | Notes |
@@ -216,7 +216,7 @@ health = baseHealth(100) × (healthScalingPerRound(1.15))^(round-1)
 | 2 | 115 | 15% increase |
 | 3 | ~132 | |
 | 5 | ~175 | Nearly double |
-| 10 | ~352 | 3.5× base |
+| 10 | ~352 | 3.5? base |
 | 20 | ~1,424 | Getting tough |
 
 ### Zombie Speed Scaling
@@ -224,15 +224,15 @@ health = baseHealth(100) × (healthScalingPerRound(1.15))^(round-1)
 Calculated in **`RoundManager.getScaledZombieSpeed()`**:
 
 ```
-speed = baseSpeed(1.0) × (speedScalingPerRound(1.05))^(round-1)
+speed = baseSpeed(1.0) ? (speedScalingPerRound(1.05))^(round-1)
 ```
 
 | Round | Speed | Effect |
 |-------|-------|--------|
-| 1 | 1.0× | Walking pace |
-| 5 | ~1.22× | Noticeably faster |
-| 10 | ~1.55× | Sprinting |
-| 20 | ~2.53× | Extremely fast |
+| 1 | 1.0? | Walking pace |
+| 5 | ~1.22? | Noticeably faster |
+| 10 | ~1.55? | Sprinting |
+| 20 | ~2.53? | Extremely fast |
 
 ### Points System
 
@@ -243,7 +243,7 @@ speed = baseSpeed(1.0) × (speedScalingPerRound(1.05))^(round-1)
 
 ---
 
-## 🧪 How to Test the Spawning Cycle (Without a Server)
+## ?? How to Test the Spawning Cycle (Without a Server)
 
 All spawning logic can be tested through the existing unit tests. Run:
 
@@ -264,16 +264,16 @@ All spawning logic can be tested through the existing unit tests. Run:
 | `DoublePointsEffect` | `doubleKillPoints()` | Double Points doubles kill rewards to 200 |
 | `InstaKillEffect` | `instaKillOneHit()` | Insta-Kill kills in one hit regardless of HP |
 
-**`RoundManagerTest.java` — tests the round/scaling math:**
+**`RoundManagerTest.java` ? tests the round/scaling math:**
 
 | Test Method | What It Proves |
 |---|---|
 | `getScaledZombieHealth_round1()` | Round 1 health = base (100) |
-| `getScaledZombieHealth_lateRounds()` | Round 5 health = 100 × 1.15^4 |
+| `getScaledZombieHealth_lateRounds()` | Round 5 health = 100 ? 1.15^4 |
 | `getSpawnCount()` | Spawn count includes base + per-player + round bonus |
 | `decrementActiveZombies_autoAdvance()` | When all zombies die, round auto-advances |
 
-**`SpawnManagerTest.java` — tests the spawn node system:**
+**`SpawnManagerTest.java` ? tests the spawn node system:**
 
 | Test Method | What It Proves |
 |---|---|
@@ -285,61 +285,62 @@ All spawning logic can be tested through the existing unit tests. Run:
 
 ---
 
-## ✅ What's Already Working (The Logical Layer — Fully Tested)
+## ? What's Already Working (The Logical Layer ? Fully Tested)
 
 | Feature | Status | Key File(s) |
 |---------|--------|-------------|
-| 3 spawn points in one zone | ✅ | `HytaleZombiePlugin.setupDefaultMap()` |
-| Random selection between spawn points | ✅ | `SpawnManager.getRandomSpawnNode()` |
-| Randomized offset within spawn radius | ✅ | `SpawnManager.getRandomizedPosition(node)` |
-| Interval-based spawning (configurable delay) | ✅ | `GameSession.handleSpawning()` |
-| Per-round zombie count calculation | ✅ | `RoundManager.getSpawnCount()` |
-| Scaled zombie health per round | ✅ | `RoundManager.getScaledZombieHealth()` |
-| Scaled zombie speed per round | ✅ | `RoundManager.getScaledZombieSpeed()` |
-| Auto-advance round when all clear | ✅ | `RoundManager.decrementActiveZombies()` |
-| 20-tick-per-second game loop | ✅ | `HytaleZombiePlugin.startGameLoop()` |
-| Points awarded on hits (10) and kills (100) | ✅ | `GameSession.damageZombie()` |
-| Double Points / Insta-Kill power-ups | ✅ | `GameSession.activatePowerUp()` |
-| Nuke kills all active zombies | ✅ | `GameSession.nukeAllZombies()` |
-| Weapon purchasing economy | ✅ | `GameSession.purchaseWeapon()` |
-| Perk purchasing economy | ✅ | `GameSession.purchasePerk()` |
-| Door/zone unlocking | ✅ | `GameSession.purchaseDoor()` |
-| Barriers with repair mechanics | ✅ | `Barrier.java`, `BarrierManager.java` |
-| Player data tracking (points, kills, downs) | ✅ | `PlayerDataManager.java` |
-| Map zone connectivity system | ✅ | `ZoneManager.java`, `MapZone.java` |
-| 12 perk types with costs | ✅ | `Perk.java` |
-| 7 power-up types | ✅ | `PowerUp.java` |
-| Weapon registry with wall + mystery box | ✅ | `WeaponRegistry.java` |
-| 138 unit tests (all passing) | ✅ | `src/test/` |
+| Spawn points placed by user | ? | `HytaleZombiePlugin.setupDefaultMap()` |
+| Random selection between spawn points | ? | `SpawnManager.getRandomSpawnNode()` |
+| Randomized offset within spawn radius | ? | `SpawnManager.getRandomizedPosition(node)` |
+| Interval-based spawning (configurable delay) | ? | `GameSession.handleSpawning()` |
+| Per-round zombie count calculation | ? | `RoundManager.getSpawnCount()` |
+| Scaled zombie health per round | ? | `RoundManager.getScaledZombieHealth()` |
+| Scaled zombie speed per round | ? | `RoundManager.getScaledZombieSpeed()` |
+| Auto-advance round when all clear | ? | `RoundManager.decrementActiveZombies()` |
+| 20-tick-per-second game loop | ? | `HytaleZombiePlugin.startGameLoop()` |
+| Points awarded on hits (10) and kills (100) | ? | `GameSession.damageZombie()` |
+| Double Points / Insta-Kill power-ups | ? | `GameSession.activatePowerUp()` |
+| Nuke kills all active zombies | ? | `GameSession.nukeAllZombies()` |
+| Weapon purchasing economy | ? | `GameSession.purchaseWeapon()` |
+| Perk purchasing economy | ? | `GameSession.purchasePerk()` |
+| Door/zone unlocking | ? | `GameSession.purchaseDoor()` |
+| Barriers with repair mechanics | ? | `Barrier.java`, `BarrierManager.java` |
+| Player data tracking (points, kills, downs) | ? | `PlayerDataManager.java` |
+| Map zone connectivity system | ? | `ZoneManager.java`, `MapZone.java` |
+| 12 perk types with costs | ? | `Perk.java` |
+| 7 power-up types | ? | `PowerUp.java` |
+| Weapon registry with wall + mystery box | ? | `WeaponRegistry.java` |
+| 138 unit tests (all passing) | ? | `src/test/` |
 
-## ✅ Hytale SDK Integration (Entity System — Complete)
+## ? Hytale SDK Integration (Entity System ? Complete)
 
 | Feature | Status | Key File(s) |
 |---------|--------|-------------|
-| ZombieEntity class (extends LivingEntity) | ✅ | `src/main/java/dev/hytalezombie/entity/ZombieEntity.java` |
-| EntitySpawnHelper (assembles ECS holder) | ✅ | `src/main/java/dev/hytalezombie/entity/EntitySpawnHelper.java` |
-| ZombieEntity registered with EntityModule | ✅ | `HytaleZombiePlugin.setup()` — registered as `"hz_zombie"` |
-| World reference accessible to GameSession | ✅ | `GameSession.setWorld()` — set from `PlayerReadyEvent` in `start()` |
-| createZombie() spawns real entities | ✅ | `GameSession.createZombie()` calls `EntitySpawnHelper.spawnZombie()` |
-| Damage event listener for zombie hits/kills | ✅ | `ZombieDamageEventSystem.java` — registered in `setup()` |
-| Entity removal on death | ✅ | `GameSession.damageZombie()` + `nukeAllZombies()` call `CommandBuffer.removeEntity()` |
+| ZombieEntity class (extends LivingEntity) | ? | `src/main/java/dev/hytalezombie/entity/ZombieEntity.java` |
+| EntitySpawnHelper (assembles ECS holder) | ? | `src/main/java/dev/hytalezombie/entity/EntitySpawnHelper.java` |
+| ZombieEntity registered with EntityModule | ? | `HytaleZombiePlugin.setup()` ? registered as `"hz_zombie"` |
+| World reference accessible to GameSession | ? | `GameSession.setWorld()` ? set from `PlayerReadyEvent` in `start()` |
+| createZombie() spawns real entities | ? | `GameSession.createZombie()` calls `EntitySpawnHelper.spawnZombie()` |
+| Damage event listener for zombie hits/kills | ? | `ZombieDamageEventSystem.java` ? registered in `setup()` |
+| Entity removal on death | ? | `ZombieDamageEventSystem` uses `CommandBuffer.removeEntity()` (safe during ECS iteration); `nukeAllZombies()` defers via `world.execute()` |
+| Zombie AI movement | ? | `GameSession.tickZombieAI()` sets `Velocity` + `MovementStates` through Hytale physics (gravity, collision); replaces old `teleportPosition()` warp |
 
 ---
 
-## ⚠️ Important: Plugin Lifecycle
+## ?? Important: Plugin Lifecycle
 
-The Hytale plugin lifecycle follows: `NONE` → `SETUP` (via `setup()`) → `START`/`ENABLED` (via `start()`).
+The Hytale plugin lifecycle follows: `NONE` ? `SETUP` (via `setup()`) ? `START`/`ENABLED` (via `start()`).
 
 | Phase | When | What you can do | What you CAN'T do |
 |-------|------|-----------------|-------------------|
 | `preLoad()` | Plugin loaded, state is `NONE` | Create managers, init fields | Register entities, commands, events, game loops |
 | `setup()` | Plugin transitioning to `SETUP` state | Register **entity types** via `getEntityRegistry().registerEntity()` | Register commands, events (plugin not yet ENABLED) |
-| `start()` | Plugin is `ENABLED` | Register commands, events, start game loops | — |
+| `start()` | Plugin is `ENABLED` | Register commands, events, start game loops | ? |
 
 Commands and events **cannot** be registered in `preLoad()` or `setup()`. Only in `start()`:
 
 ```java
-// ✅ CORRECT — move registrations here
+// ? CORRECT ? move registrations here
 @Override
 protected void start() {
     getCommandRegistry().registerCommand(new MyCommand(this));
@@ -348,11 +349,11 @@ protected void start() {
 }
 ```
 
-## 🔌 Hytale SDK Integration — Step-by-Step Plan
+## ?? Hytale SDK Integration ? Step-by-Step Plan
 
-### Step 1 ✅ — Register ZombieEntity with EntityModule
-**File**: `HytaleZombiePlugin.java` — `setup()` method added.
-**Status**: ✅ COMPLETE
+### Step 1 ? ? Register ZombieEntity with EntityModule
+**File**: `HytaleZombiePlugin.java` ? `setup()` method added.
+**Status**: ? COMPLETE
 
 The `setup()` method now calls:
 ```java
@@ -368,13 +369,13 @@ This registers `ZombieEntity` with Hytale's ECS framework so that:
 - The entity codec (for serialization/networking) is registered
 - ECS systems can query for `ZombieEntity` components
 
-### Step 2 ✅ — Provide World Reference for Entity Spawning
+### Step 2 ? ? Provide World Reference for Entity Spawning
 **Files**: `GameSession.java`, `HytaleZombiePlugin.java`
-**Status**: ✅ COMPLETE
+**Status**: ? COMPLETE
 
 Added a `World` field to `GameSession` with `setWorld()`/`getWorld()` accessors. The world is obtained from the first `PlayerReadyEvent`:
 ```java
-// In HytaleZombiePlugin.start() — PlayerReadyEvent handler:
+// In HytaleZombiePlugin.start() ? PlayerReadyEvent handler:
 if (gameSession.getWorld() == null) {
     World world = event.getPlayerRef().getStore().getExternalData().getWorld();
     if (world != null) {
@@ -383,9 +384,9 @@ if (gameSession.getWorld() == null) {
 }
 ```
 
-### Step 3 ✅ — Update createZombie() to Spawn Real Entities
+### Step 3 ? ? Update createZombie() to Spawn Real Entities
 **File**: `GameSession.java`, `EntitySpawnHelper.java`
-**Status**: ✅ COMPLETE
+**Status**: ? COMPLETE
 
 `EntitySpawnHelper.spawnZombie()` now returns a `SpawnResult` record containing both the `networkId` and the `Ref<EntityStore>` for later removal. `GameSession.createZombie()` calls it conditionally when a `World` reference is available, falling back to logical-only zombies for test compatibility:
 
@@ -405,14 +406,14 @@ private ZombieInstance createZombie(Vector3f position) {
 }
 ```
 
-### Step 4 ✅ — Hook Damage Events
+### Step 4 ? ? Hook Damage Events
 **Files**: `ZombieDamageEventSystem.java` (new), `HytaleZombiePlugin.java`
-**Status**: ✅ COMPLETE
+**Status**: ? COMPLETE
 
 Created `ZombieDamageEventSystem` extending `DamageEventSystem`. It:
 - Queries for `ZombieEntity` components
 - Runs in the `DamageModule.inspectDamageGroup`
-- Resolves zombie network ID → logical ID via `GameSession.getZombieIdByNetworkId()`
+- Resolves zombie network ID ? logical ID via `GameSession.getZombieIdByNetworkId()`
 - Extracts the attacker's UUID from the damage source
 - Forwards hits to `GameSession.damageZombie()`
 
@@ -421,9 +422,9 @@ Registered in `HytaleZombiePlugin.setup()`:
 getEntityStoreRegistry().registerSystem(new ZombieDamageEventSystem(gameSession));
 ```
 
-### Step 5 ✅ — Handle Entity Removal on Death
+### Step 5 ? ? Handle Entity Removal on Death
 **Files**: `GameSession.java`
-**Status**: ✅ COMPLETE
+**Status**: ? COMPLETE
 
 In `damageZombie()`, when a zombie dies:
 ```java
@@ -446,17 +447,17 @@ Same pattern applied to `nukeAllZombies()` for bulk entity removal.
 
 | Integration Point | File | Status |
 |---|---|---|
-| Extend `JavaPlugin` | `HytaleZombiePlugin.java` | ✅ Already extends it |
-| Register commands via Hytale's API | `HytaleZombieCommand.java` | ✅ Already extends `AbstractCommand` |
-| Handle `PlayerReadyEvent` | `HytaleZombiePlugin.java` | ✅ Registered in `start()` + sets World |
-| Game loop via Hytale's task system | `HytaleZombiePlugin.java` | ✅ Uses `TaskRegistration` |
-| Send messages with `Message` API | `HytaleZombieCommand.java` | ✅ Uses `Message.raw()` |
-| Entity registration with EntityModule | `HytaleZombiePlugin.java` | ✅ `setup()` calls `getEntityRegistry().registerEntity()` |
-| Damage event system | `ZombieDamageEventSystem.java` | ✅ Registered in `setup()` |
+| Extend `JavaPlugin` | `HytaleZombiePlugin.java` | ? Already extends it |
+| Register commands via Hytale's API | `HytaleZombieCommand.java` | ? Already extends `AbstractCommand` |
+| Handle `PlayerReadyEvent` | `HytaleZombiePlugin.java` | ? Registered in `start()` + sets World |
+| Game loop via Hytale's task system | `HytaleZombiePlugin.java` | ? Uses `TaskRegistration` |
+| Send messages with `Message` API | `HytaleZombieCommand.java` | ? Uses `Message.raw()` |
+| Entity registration with EntityModule | `HytaleZombiePlugin.java` | ? `setup()` calls `getEntityRegistry().registerEntity()` |
+| Damage event system | `ZombieDamageEventSystem.java` | ? Registered in `setup()` |
 
 ---
 
-## 🚀 Quick Start Guide
+## ?? Quick Start Guide
 
 ### Run the server:
 
@@ -477,11 +478,11 @@ cd ~/Desktop/Code/Personal/HytaleZombies
 
 ### Key files to read:
 
-1. **`src/main/java/dev/hytalezombie/manager/GameSession.java`** — The main orchestrator. Read `tick()`, `handleSpawning()`, `createZombie()`, `damageZombie()`, `checkRoundComplete()`
-2. **`src/main/java/dev/hytalezombie/HytaleZombiePlugin.java`** — Entry point, game loop, `setupDefaultMap()` where you set spawn positions
-3. **`src/main/java/dev/hytalezombie/manager/RoundManager.java`** — Round tracking, scaling math, spawn count formula
-4. **`src/main/java/dev/hytalezombie/spawn/SpawnManager.java`** — Spawn node registry, random selection, position randomization
-5. **`src/main/java/dev/hytalezombie/config/HytaleZombieConfig.java`** — All tunable values (spawn delay, health, speed, costs)
+1. **`src/main/java/dev/hytalezombie/manager/GameSession.java`** ? The main orchestrator. Read `tick()`, `handleSpawning()`, `createZombie()`, `damageZombie()`, `checkRoundComplete()`
+2. **`src/main/java/dev/hytalezombie/HytaleZombiePlugin.java`** ? Entry point, game loop, `setupDefaultMap()` where you set spawn positions
+3. **`src/main/java/dev/hytalezombie/manager/RoundManager.java`** ? Round tracking, scaling math, spawn count formula
+4. **`src/main/java/dev/hytalezombie/spawn/SpawnManager.java`** ? Spawn node registry, random selection, position randomization
+5. **`src/main/java/dev/hytalezombie/config/HytaleZombieConfig.java`** ? All tunable values (spawn delay, health, speed, costs)
 
 ### Entity spawning is now live:
 
@@ -495,12 +496,12 @@ The game loop, timing, scaling, points, and round advancement were already fully
 
 ---
 
-## 🎮 Game Commands
+## ?? Game Commands
 
 ### Match Controls
 | Command | What It Does |
 |---------|-------------|
-| `/hytalezombie start` or `/hz start` | Starts a match, sets up default map with 3 spawn points, begins round 1 |
+| `/hytalezombie start` or `/hz start` | Starts a match, marks spawn_room zone, begins round 1. Use /hz setspawn to add spawn points |
 | `/hytalezombie stop` or `/hz stop` | Ends the current match |
 | `/hytalezombie round [n]` or `/hz round [n]` | Shows or sets the current round number |
 | `/hytalezombie info` or `/hz info` | Shows match status, round, active zombies, player count |
@@ -520,7 +521,7 @@ The game loop, timing, scaling, points, and round advancement were already fully
 
 ---
 
-## 🔧 Config Reference (`HytaleZombieConfig.java`)
+## ?? Config Reference (`HytaleZombieConfig.java`)
 
 | Property | Default | What It Controls |
 |----------|---------|------------------|
@@ -536,45 +537,68 @@ The game loop, timing, scaling, points, and round advancement were already fully
 
 ---
 
-## 🗺 Project File Map
+## ?? Project File Map
 
 ```
 src/main/java/dev/hytalezombie/
-├── HytaleZombiePlugin.java             # Entry point + setup() + start() + game loop
-│   ├── setup()                         # Registers ZombieEntity with EntityModule
-│   ├── start()                         # Registers commands, events, game loop
-│   └── setupDefaultMap()               # Default spawn points for testing
-├── commands/
-│   └── HytaleZombieCommand.java        # /hytalezombie command handler
-├── config/
-│   └── HytaleZombieConfig.java         # All tunable values
-├── entity/
-│   ├── EntitySpawnHelper.java          # Assembles ECS entity holder and spawns into world
-│   └── ZombieEntity.java               # Zombie entity class (extends LivingEntity)
-├── events/
-│   └── PlayerConnectionListener.java   # Player join utility
-├── manager/
-│   ├── BarrierManager.java             # CRUD for window barriers
-│   ├── DebugManager.java               # Debug mode + spawn node visualization
-│   ├── GameManagerProvider.java        # Interface for accessing all managers
-│   ├── GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy)
-│   ├── PlayerDataManager.java          # Per-player state management
-│   ├── RoundManager.java               # Round tracking + scaling calculations
-│   ├── WeaponRegistry.java             # All weapon definitions
-│   └── ZoneManager.java                # Map zone connectivity + door unlocking
-├── model/
-│   ├── Barrier.java                    # Barrier state machine (INTACT→DAMAGED→BROKEN)
-│   ├── MapZone.java                    # Named zone with door cost
-│   ├── Perk.java                       # Perk-a-Cola definitions (12 perks)
-│   ├── PlayerData.java                 # Points, kills, downs, alive
-│   ├── PowerUp.java                    # Power-up types + timed duration
-│   ├── Vector3f.java                   # Float 3D vector (entity positions)
-│   ├── Vector3i.java                   # Int 3D vector (block positions)
-│   └── Weapon.java                     # Weapon stats + Pack-a-Punch
-└── spawn/
-    ├── SpawnManager.java               # Spawn node registry + random selection
-    └── SpawnNode.java                  # A single spawn point (zoneId, position, radius)
+??? HytaleZombiePlugin.java             # Entry point + setup() + start() + game loop
+?   ??? setup()                         # Registers ZombieEntity with EntityModule
+?   ??? start()                         # Registers commands, events, game loop
+?   ??? setupDefaultMap()               # No default spawns - use /hz setspawn in-game
+??? commands/
+?   ??? HytaleZombieCommand.java        # /hytalezombie command handler
+??? config/
+?   ??? HytaleZombieConfig.java         # All tunable values
+??? entity/
+?   ??? EntitySpawnHelper.java          # Assembles ECS entity holder and spawns into world
+?   ??? ZombieEntity.java               # Zombie entity class (extends LivingEntity)
+??? events/
+?   ??? PlayerConnectionListener.java   # Player join utility
+??? manager/
+?   ??? BarrierManager.java             # CRUD for window barriers
+?   ??? DebugManager.java               # Debug mode + spawn node visualization
+?   ??? GameManagerProvider.java        # Interface for accessing all managers
+?   ??? GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy)
+?   ??? PlayerDataManager.java          # Per-player state management
+?   ??? RoundManager.java               # Round tracking + scaling calculations
+?   ??? WeaponRegistry.java             # All weapon definitions
+?   ??? ZoneManager.java                # Map zone connectivity + door unlocking
+??? model/
+?   ??? Barrier.java                    # Barrier state machine (INTACT?DAMAGED?BROKEN)
+?   ??? MapZone.java                    # Named zone with door cost
+?   ??? Perk.java                       # Perk-a-Cola definitions (12 perks)
+?   ??? PlayerData.java                 # Points, kills, downs, alive
+?   ??? PowerUp.java                    # Power-up types + timed duration
+?   ??? Vector3f.java                   # Float 3D vector (entity positions)
+?   ??? Vector3i.java                   # Int 3D vector (block positions)
+?   ??? Weapon.java                     # Weapon stats + Pack-a-Punch
+??? spawn/
+    ??? SpawnManager.java               # Spawn node registry + random selection
+    ??? SpawnNode.java                  # A single spawn point (zoneId, position, radius)
+??? manager/
+?   ??? ...                             # (existing managers)
+?   ??? ScoreboardManager.java          # NEW: Persistent HUD display (round, zombies, points)
 ```
+
+---
+
+## Recent Changes & Bug Fixes
+
+### ✅ Phase 1: Fixed Async Race Condition (UUID-based Damage Routing)
+**Bug**: `ZombieDamageEventSystem` used `zombie.getNetworkId()` for entity lookup, but the networkId was set asynchronously via `CompletableFuture`. Damage events could arrive before the mapping existed, causing kills to be silently lost.
+
+**Fix**: `GameSession.createZombie()` now generates a `UUID` synchronously and stores it in `uuidToZombieId`. `EntitySpawnHelper` accepts an optional UUID parameter. `ZombieDamageEventSystem` reads `UUIDComponent` and calls `gameSession.getZombieIdByUuid()`.
+
+### ✅ Phase 2: Fixed Round Advancement Deadlock
+**Bug**: When all zombies were killed, `decrementActiveZombies()` incremented the round counter via `advanceRound()` but `prepareRoundSpawns()` was never called. Round 2+ had `totalZombiesToSpawn = 0`.
+
+**Fix**: Removed auto-advance from `RoundManager.decrementActiveZombies()`. `GameSession.checkRoundComplete()` now calls `advanceRound()` + `prepareRoundSpawns()`.
+
+### ✅ Phase 3: Zombie AI / Movement
+**Feature**: Zombies move toward a target point at scaled speed using tick-based movement synced to Hytale entity `TransformComponent` positions via `world.execute()`.
+
+### ✅ Phase 4: Persistent Scoreboard / HUD
+**Feature**: `ScoreboardManager` sends periodic updates to all players every 20 ticks showing round, zombie count, and player points.
 
 ---
 

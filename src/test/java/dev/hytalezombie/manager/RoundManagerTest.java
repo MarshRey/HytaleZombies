@@ -166,13 +166,13 @@ class RoundManagerTest {
         }
 
         @Test
-        @DisplayName("should auto-advance round when all zombies eliminated")
-        void decrementActiveZombies_autoAdvance() {
+        @DisplayName("should not auto-advance round anymore (moved to GameSession.checkRoundComplete)")
+        void decrementActiveZombies_noAutoAdvance() {
             roundManager.incrementActiveZombies();
             assertEquals(1, roundManager.getCurrentRound());
             roundManager.decrementActiveZombies();
-            // Auto-advance triggers when count hits 0
-            assertEquals(2, roundManager.getCurrentRound());
+            // Auto-advance was removed from RoundManager; now handled by GameSession
+            assertEquals(1, roundManager.getCurrentRound());
         }
 
         @Test

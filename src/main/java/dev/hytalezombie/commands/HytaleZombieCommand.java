@@ -1,10 +1,16 @@
 package dev.hytalezombie.commands;
 
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.AbstractCommand;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
+import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.HytaleZombiePlugin;
 import dev.hytalezombie.config.HytaleZombieConfig;
+import dev.hytalezombie.entity.EntitySpawnHelper;
 import dev.hytalezombie.manager.GameSession;
 import dev.hytalezombie.model.Perk;
 import dev.hytalezombie.model.PowerUp;
@@ -12,10 +18,13 @@ import dev.hytalezombie.model.Vector3f;
 import dev.hytalezombie.model.Weapon;
 import dev.hytalezombie.spawn.SpawnNode;
 
+import org.joml.Vector3d;
+
 import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 
 /**
  * Admin command for the HytaleZombie mod.
@@ -118,6 +127,11 @@ public class HytaleZombieCommand extends AbstractCommand {
                 handleSpawnZombie(ctx, args);
                 break;
 
+            case "spawnhere":
+            case "summon":
+                handleSpawnHere(ctx);
+                break;
+
             case "killall":
                 handleKillAll(ctx);
                 break;
@@ -201,7 +215,9 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("  /hz listspawns [zone]                 - List all spawns"));
         ctx.sendMessage(Message.raw("  /hz clearspawns                       - Remove all spawns"));
         ctx.sendMessage(Message.raw("Zombie Testing:"));
-        ctx.sendMessage(Message.raw("  /hz spawnzombie [zone] [count]        - Spawn zombie(s)"));
+        ctx.sendMessage(Message.raw("  /hz spawnzombie [zone] [count]        - Spawn zombie(s) at spawn nodes"));
+        ctx.sendMessage(Message.raw("  /hz spawnhere                         - Spawn zombie right at your position"));
+        ctx.sendMessage(Message.raw("  /hz summon                            - (alias for spawnhere)"));
         ctx.sendMessage(Message.raw("  /hz killall                           - Kill all active zombies"));
         ctx.sendMessage(Message.raw("  /hz zombieinfo                        - List all zombie stats"));
         ctx.sendMessage(Message.raw("  /hz spawninfo                         - Spawn progress this round"));
@@ -539,9 +555,10 @@ public class HytaleZombieCommand extends AbstractCommand {
      */
     private void handleSpawnZombie(CommandContext ctx, String[] args) {
         GameSession session = plugin.getGameSession();
-        if (!session.isSessionActive()) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] No active match! Start one with /hz start"));
-            return;
+        boolean matchActive = session.isSessionActive();
+
+        if (!matchActive) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match - spawning test zombie(s) without round tracking."));
         }
 
         String zoneId = null;
@@ -581,7 +598,12 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         int spawned = 0;
         for (int i = 0; i < count; i++) {
-            Optional<GameSession.ZombieInstance> result = session.spawnZombieInstance(zoneId);
+            Optional<GameSession.ZombieInstance> result;
+            if (matchActive) {
+                result = session.spawnZombieInstance(zoneId);
+            } else {
+                result = session.spawnTestZombie(zoneId);
+            }
             if (result.isPresent()) {
                 spawned++;
             } else {
@@ -591,6 +613,75 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         String zoneInfo = (zoneId != null) ? " from zone '" + zoneId + "'" : "";
         ctx.sendMessage(Message.raw("[HytaleZombie] Spawned " + spawned + " zombie(s)" + zoneInfo + "."));
+    }
+
+    /**
+     * /hz spawnhere
+     *
+     * Spawns a zombie entity directly at the player's position, bypassing
+     * the spawn-node system entirely. This is useful for testing whether
+     * entity spawning itself works (model loading, world.execute(), etc.).
+     * Reports the NetworkId on success, or a clear error on failure.
+     */
+    private void handleSpawnHere(CommandContext ctx) {
+        // 1. Must be a player
+        if (!ctx.isPlayer()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Only players can use /hz spawnhere."));
+            return;
+        }
+
+        // 2. Get the player's entity reference (safe on ForkJoinPool)
+        Ref<EntityStore> playerRef = ctx.senderAsPlayerRef();
+        if (playerRef == null) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Could not get player entity reference."));
+            return;
+        }
+
+        // 3. Pick a random zombie model (no store access needed)
+        String modelName = EntitySpawnHelper.getRandomZombieModel();
+
+        // 4. Get the cached World reference from the GameSession
+        //    (set during PlayerReadyEvent, no store access needed)
+        World world = plugin.getGameSession().getWorld();
+        if (world == null) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] World reference is NULL. Has a player fully joined?"));
+            ctx.sendMessage(Message.raw("  The world is set in PlayerReadyEvent on server join."));
+            ctx.sendMessage(Message.raw("  Try rejoining the server and running /hz spawnhere again."));
+            return;
+        }
+
+        // 5. Spawn using the player-ref method which runs ALL store operations
+        //    (reading TransformComponent, building holder, addEntity) inside a
+        //    single world.execute() block on the WorldThread.
+        ctx.sendMessage(Message.raw("[HytaleZombie] Spawning " + modelName + " at your position..."));
+
+        EntitySpawnHelper.spawnZombieAtPlayer(world, playerRef, modelName)
+            .thenAccept(result -> {
+                if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
+                    ctx.sendMessage(Message.raw("[HytaleZombie] SPAWN SUCCESS: entity spawned with NetworkId=" + result.networkId()));
+                    plugin.getLogger().at(Level.INFO).log(
+                        "spawnhere SUCCESS: networkId={0} for {1}",
+                        result.networkId(), modelName
+                    );
+                } else {
+                    ctx.sendMessage(Message.raw("[HytaleZombie] SPAWN FAILED: store.addEntity returned null or invalid ref."));
+                    ctx.sendMessage(Message.raw("  Possible causes:"));
+                    ctx.sendMessage(Message.raw("  - Model asset '" + modelName + "' not found in runtime"));
+                    ctx.sendMessage(Message.raw("  - EntityStore rejected the holder (missing a required component)"));
+                    ctx.sendMessage(Message.raw("  - World tick is not processing the execute() queue"));
+                    plugin.getLogger().at(Level.WARNING).log(
+                        "spawnhere FAILED: store.addEntity returned null/invalid ref for {0}",
+                        modelName
+                    );
+                }
+            })
+            .exceptionally(ex -> {
+                ctx.sendMessage(Message.raw("[HytaleZombie] SPAWN ERROR: " + ex.getMessage()));
+                plugin.getLogger().at(Level.SEVERE).log(
+                    "spawnhere EXCEPTION: {0}", ex.getMessage()
+                );
+                return null;
+            });
     }
 
     /**
@@ -960,6 +1051,10 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("=== HytaleZombie State ==="));
         ctx.sendMessage(Message.raw("Match: " + (session.isSessionActive() ? "ACTIVE" : "INACTIVE")));
         ctx.sendMessage(Message.raw("Tick: " + session.getTickCounter()));
+
+        // World reference status (visible even without active match)
+        World w = session.getWorld();
+        ctx.sendMessage(Message.raw("World ref: " + (w != null ? "SET (" + w.getName() + ")" : "NULL - no player has fully joined yet")));
 
         if (session.isSessionActive()) {
             ctx.sendMessage(Message.raw("Round: " + roundManager.getCurrentRound()));
