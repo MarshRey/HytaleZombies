@@ -404,22 +404,28 @@ public class GameSession {
             }
         }
 
-        // Sync velocities and movement states to Hytale entities on the world thread.
+        // Sync entity positions and movement states on the world thread.
         // Only sync every AI_SYNC_INTERVAL ticks to avoid saturating the world thread.
-        // Uses Velocity component + MovementStates instead of teleportPosition() so that
-        // Hytale's physics system handles gravity, collision, and smooth movement.
+        // Uses direct position-setting (X/Z only) instead of Velocity component because
+        // LivingEntity types in Hytale do not have an automatic physics system that
+        // reads Velocity and updates TransformComponent. Gravity is applied manually
+        // when the entity is not on ground.
         if (world != null && aiSyncCounter % AI_SYNC_INTERVAL == 0) {
             // Snapshot the map to avoid concurrent modification issues
             final Map<String, ZombieInstance> snapshot = new HashMap<>(activeZombies);
             // Capture player positions for target computation on the world thread
             final Map<String, Vector3f> playerPosSnapshot = new HashMap<>(playerPositions);
+            final float dt = AI_SYNC_INTERVAL / 20.0f; // seconds elapsed since last sync
+            final float gravity = 20.0f; // blocks/sec^2 — applied when not on ground
             world.execute(() -> {
                 for (ZombieInstance zombie : snapshot.values()) {
                     if (!zombie.isAlive()) continue;
                     try {
                         zombie.getEntityRef().ifPresent(ref -> {
                             if (!ref.isValid()) return;
-                            Store<EntityStore> store = ref.getStore();
+                            final Store<EntityStore> store = ref.getStore();
+                            final TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+                            if (transform == null) return;
 
                             // Find nearest player target for this zombie
                             Vector3f target = DEFAULT_AI_TARGET;
@@ -437,62 +443,74 @@ public class GameSession {
                                 }
                             }
 
-                            // Compute direction toward target
-                            float dx = target.x() - zombiePos.x();
-                            float dz = target.z() - zombiePos.z();
-                            float dist = (float) Math.sqrt(dx * dx + dz * dz);
+                            // === Read current state from Hytale ===
+                            final org.joml.Vector3d currentPos = transform.getPosition();
+                            final MovementStatesComponent movementStatesComp =
+                                store.getComponent(ref, MovementStatesComponent.getComponentType());
+                            final MovementStates states = movementStatesComp != null
+                                ? movementStatesComp.getMovementStates() : null;
+
+                            // Sync logical position from actual Hytale transform
+                            final Vector3f logicalPos = new Vector3f(
+                                (float) currentPos.x(), (float) currentPos.y(), (float) currentPos.z());
+                            zombie.setCurrentPosition(logicalPos);
+
+                            // Compute direction to target (horizontal only)
+                            final float dx = target.x() - logicalPos.x();
+                            final float dz = target.z() - logicalPos.z();
+                            final float dist = (float) Math.sqrt(dx * dx + dz * dz);
+
+                            // === Determine new position ===
+                            double newX = currentPos.x();
+                            double newY = currentPos.y();
+                            double newZ = currentPos.z();
 
                             if (dist >= 0.5f) {
-                                float nx = dx / dist;
-                                float nz = dz / dist;
+                                final float nx = dx / dist;
+                                final float nz = dz / dist;
+                                final float speed = zombie.getSpeed();
+                                final float moveAmount = speed * dt;
 
-                                // Set Velocity component (blocks per second) so Hytale physics
-                                // handles movement properly with gravity and collision
-                                com.hypixel.hytale.server.core.modules.physics.component.Velocity velocity =
-                                    store.getComponent(ref, com.hypixel.hytale.server.core.modules.physics.component.Velocity.getComponentType());
-                                if (velocity != null) {
-                                    float speed = zombie.getSpeed();
-                                    velocity.set(nx * speed, velocity.getY(), nz * speed);
-                                }
+                                newX = currentPos.x() + nx * moveAmount;
+                                newZ = currentPos.z() + nz * moveAmount;
 
-                                // Update MovementStates so the entity animates and behaves
-                                // like a walking zombie (not idle/frozen)
-                                com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent movementStatesComp =
-                                    store.getComponent(ref, com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent.getComponentType());
-                                if (movementStatesComp != null) {
-                                    com.hypixel.hytale.protocol.MovementStates states = movementStatesComp.getMovementStates();
+                                // Set rotation to face movement direction (Minecraft yaw convention)
+                                final float yaw = (float) Math.toDegrees(Math.atan2(-nx, nz));
+                                transform.setRotation(new Rotation3f(0, yaw, 0));
+
+                                // Update movement states for walking animation
+                                if (states != null) {
                                     states.walking = true;
-                                    states.running = zombie.getSpeed() > 1.5f;
+                                    states.running = speed > 1.5f;
                                     states.idle = false;
                                     states.horizontalIdle = false;
                                 }
-
-                                // Set rotation so the zombie faces its target
-                                TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
-                                if (transform != null) {
-                                    float yaw = (float) Math.toDegrees(Math.atan2(-dx, -dz));
-                                    transform.setRotation(new com.hypixel.hytale.math.vector.Rotation3f(0, yaw, 0));
-                                }
                             } else {
-                                // Close enough - set idle
-                                com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent movementStatesComp =
-                                    store.getComponent(ref, com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent.getComponentType());
-                                if (movementStatesComp != null) {
-                                    com.hypixel.hytale.protocol.MovementStates states = movementStatesComp.getMovementStates();
+                                // Close enough — set idle
+                                if (states != null) {
                                     states.walking = false;
                                     states.idle = true;
                                     states.horizontalIdle = true;
                                 }
                             }
 
-                            // Sync logical position from the actual Hytale transform
-                            // (so gravity/collision effects are reflected in game logic)
-                            TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
-                            if (transform != null) {
-                                org.joml.Vector3d actualPos = transform.getPosition();
-                                zombie.setCurrentPosition(new Vector3f(
-                                    (float) actualPos.x(), (float) actualPos.y(), (float) actualPos.z()));
+                            // === Apply gravity ===
+                            // Apply downward acceleration when the entity is not on ground,
+                            // but clamp to a minimum Y (spawn height minus a safety margin)
+                            // to prevent infinite falling if onGround is never set by Hytale.
+                            final double minY = zombie.getSpawnPosition().y() - 2.0;
+                            if (states != null && !states.onGround && currentPos.y() > minY) {
+                                newY = Math.max(minY, currentPos.y() - gravity * dt * dt);
+                                states.falling = true;
+                            } else if (states != null) {
+                                states.falling = false;
                             }
+
+                            // === Write position back ===
+                            transform.setPosition(new org.joml.Vector3d(newX, newY, newZ));
+
+                            // Update logical position
+                            zombie.setCurrentPosition(new Vector3f((float) newX, (float) newY, (float) newZ));
                         });
                     } catch (Exception e) {
                         // Entity may have been removed— safe to skip
