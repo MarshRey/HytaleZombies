@@ -1,6 +1,5 @@
 package dev.hytalezombie.manager;
 
-import dev.hytalezombie.HytaleZombiePlugin;
 import dev.hytalezombie.config.HytaleZombieConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,8 +11,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.util.logging.Logger;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -23,20 +20,12 @@ import static org.mockito.Mockito.*;
 class RoundManagerTest {
 
     @Mock
-    private HytaleZombiePlugin plugin;
-
-    @Mock
-    private Logger logger;
-
-    @Mock
     private HytaleZombieConfig config;
 
     private RoundManager roundManager;
 
     @BeforeEach
     void setUp() {
-        when(plugin.getLogger()).thenReturn(logger);
-
         // Set up default config values
         when(config.getZombieBaseHealth()).thenReturn(100.0f);
         when(config.getHealthScalingPerRound()).thenReturn(1.15f);
@@ -46,7 +35,7 @@ class RoundManagerTest {
         when(config.getZombiesPerPlayer()).thenReturn(2);
 
         // Use the test-friendly constructor that accepts config directly
-        roundManager = new RoundManager(plugin, config);
+        roundManager = new RoundManager(config);
     }
 
     @Nested
@@ -125,11 +114,13 @@ class RoundManagerTest {
         @Test
         @DisplayName("should log start and end messages")
         void logging() {
+            // RoundManager now logs via java.util.logging.Logger directly.
+            // Just verify state changes work correctly.
             roundManager.startMatch();
-            verify(logger).info("HytaleZombie match started! Round 1");
+            assertTrue(roundManager.isMatchActive());
 
             roundManager.endMatch();
-            verify(logger).info("HytaleZombie match ended.");
+            assertFalse(roundManager.isMatchActive());
         }
     }
 

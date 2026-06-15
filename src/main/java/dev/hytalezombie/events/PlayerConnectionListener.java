@@ -1,10 +1,11 @@
 package dev.hytalezombie.events;
 
 /**
- * Listens for player connection events to initialize player-specific data.
+ * Player connection event handling.
  * 
- * In a real Hytale environment, this would use Hytale's PlayerReadyEvent.
- * For development/testing, we define a simpler event interface.
+ * PlayerReadyEvent handling is now done directly in HytaleZombiePlugin.preLoad()
+ * via Hytale's EventRegistry. This class is kept as a utility for any
+ * player-related logic that needs to be shared.
  */
 public class PlayerConnectionListener {
 
@@ -20,6 +21,6 @@ public class PlayerConnectionListener {
      * @param playerId the UUID of the ready player
      */
     public void onPlayerReady(String playerId) {
-        System.out.println("§6[HytaleZombie] §aWelcome to HytaleZombie, " + playerId + "! Type /hytalezombie for help.");
+        System.out.println("[HytaleZombie] Welcome to HytaleZombie, " + playerId + "! Type /hytalezombie for help.");
     }
 }

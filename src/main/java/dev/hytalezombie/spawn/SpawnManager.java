@@ -1,11 +1,11 @@
 package dev.hytalezombie.spawn;
 
 import dev.hytalezombie.model.Vector3f;
-import dev.hytalezombie.HytaleZombiePlugin;
-import dev.hytalezombie.config.HytaleZombieConfig;
 
 import javax.annotation.Nonnull;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Manages zombie spawn nodes and handles spawn logic.
@@ -13,7 +13,8 @@ import java.util.*;
  */
 public class SpawnManager {
 
-    private final HytaleZombiePlugin plugin;
+    private static final Logger LOGGER = Logger.getLogger(SpawnManager.class.getName());
+
     private final Map<String, List<SpawnNode>> zoneSpawnNodes;
 
     /**
@@ -22,8 +23,7 @@ public class SpawnManager {
      */
     private final Set<String> occupiedZones;
 
-    public SpawnManager(@Nonnull HytaleZombiePlugin plugin) {
-        this.plugin = plugin;
+    public SpawnManager() {
         this.zoneSpawnNodes = new HashMap<>();
         this.occupiedZones = new HashSet<>();
     }
@@ -34,7 +34,7 @@ public class SpawnManager {
     public void registerSpawnNode(@Nonnull SpawnNode node) {
         zoneSpawnNodes.computeIfAbsent(node.getZoneId(), k -> new ArrayList<>())
                       .add(node);
-        plugin.getLogger().info("Registered spawn node: " + node);
+        LOGGER.log(Level.INFO, "Registered spawn node: {0}", node);
     }
 
     /**
@@ -104,6 +104,41 @@ public class SpawnManager {
     }
 
     /**
+     * Removes all spawn nodes for a specific zone.
+     * @param zoneId the zone whose spawns should be removed
+     */
+    public void removeNodesInZone(@Nonnull String zoneId) {
+        zoneSpawnNodes.remove(zoneId);
+        occupiedZones.remove(zoneId);
+        LOGGER.log(Level.INFO, "Removed all spawn nodes in zone: {0}", zoneId);
+    }
+
+    /**
+     * Returns all zone IDs that have registered spawn nodes.
+     */
+    @Nonnull
+    public Set<String> getZoneIds() {
+        return Collections.unmodifiableSet(zoneSpawnNodes.keySet());
+    }
+
+    /**
+     * Returns all spawn nodes registered for a specific zone.
+     * Returns an empty list if the zone has no nodes.
+     */
+    @Nonnull
+    public List<SpawnNode> getNodesInZone(@Nonnull String zoneId) {
+        return zoneSpawnNodes.getOrDefault(zoneId, Collections.emptyList());
+    }
+
+    /**
+     * Returns all registered occupied zones (for debugging).
+     */
+    @Nonnull
+    public Set<String> getOccupiedZones() {
+        return Collections.unmodifiableSet(occupiedZones);
+    }
+
+    /**
      * Checks if a zone has any registered spawn nodes.
      */
     public boolean hasNodesInZone(@Nonnull String zoneId) {
@@ -111,3 +146,4 @@ public class SpawnManager {
         return nodes != null && !nodes.isEmpty();
     }
 }
+

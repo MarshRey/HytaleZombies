@@ -1,7 +1,10 @@
 package dev.hytalezombie.manager;
 
-import dev.hytalezombie.HytaleZombiePlugin;
 import dev.hytalezombie.config.HytaleZombieConfig;
+
+import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Manages the round/wave system for the survival game mode.
@@ -10,42 +13,39 @@ import dev.hytalezombie.config.HytaleZombieConfig;
  */
 public class RoundManager {
 
-    private final HytaleZombiePlugin plugin;
-    private HytaleZombieConfig config;
+    private static final Logger LOGGER = Logger.getLogger(RoundManager.class.getName());
+
+    private final Supplier<HytaleZombieConfig> configSupplier;
     private int currentRound;
     private int activeZombieCount;
     private boolean matchActive;
 
     /**
-     * Creates a RoundManager linked to the plugin.
-     * The config will be loaded from the plugin's static config.
+     * Creates a RoundManager linked to the plugin via a config supplier.
+     * The config will be loaded from the supplier each time.
      */
-    public RoundManager(HytaleZombiePlugin plugin) {
-        this.plugin = plugin;
+    public RoundManager(Supplier<HytaleZombieConfig> configSupplier) {
+        this.configSupplier = configSupplier;
         this.currentRound = 0;
         this.activeZombieCount = 0;
         this.matchActive = false;
     }
 
     /**
-     * Creates a RoundManager with a specific config (for testing).
+     * Creates a RoundManager with a static config (for testing).
      */
-    public RoundManager(HytaleZombiePlugin plugin, HytaleZombieConfig config) {
-        this.plugin = plugin;
-        this.config = config;
+    public RoundManager(HytaleZombieConfig config) {
+        this.configSupplier = () -> config;
         this.currentRound = 0;
         this.activeZombieCount = 0;
         this.matchActive = false;
     }
 
     /**
-     * Returns the config, either the injected one or from the plugin.
+     * Returns the config from the supplier.
      */
     private HytaleZombieConfig getConfig() {
-        if (config != null) {
-            return config;
-        }
-        return HytaleZombiePlugin.getPluginConfig();
+        return configSupplier.get();
     }
 
     /**
@@ -55,7 +55,7 @@ public class RoundManager {
         this.currentRound = 1;
         this.matchActive = true;
         this.activeZombieCount = 0;
-        plugin.getLogger().info("HytaleZombie match started! Round 1");
+        LOGGER.log(Level.INFO, "HytaleZombie match started! Round 1");
     }
 
     /**
@@ -65,7 +65,7 @@ public class RoundManager {
         this.currentRound = 0;
         this.matchActive = false;
         this.activeZombieCount = 0;
-        plugin.getLogger().info("HytaleZombie match ended.");
+        LOGGER.log(Level.INFO, "HytaleZombie match ended.");
     }
 
     /**
@@ -74,7 +74,7 @@ public class RoundManager {
     public void advanceRound() {
         if (!matchActive) return;
         this.currentRound++;
-        plugin.getLogger().info("HytaleZombie advancing to round " + currentRound);
+        LOGGER.log(Level.INFO, "HytaleZombie advancing to round {0}", currentRound);
     }
 
     /**

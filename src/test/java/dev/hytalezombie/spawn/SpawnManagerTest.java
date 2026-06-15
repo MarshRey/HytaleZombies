@@ -1,34 +1,18 @@
 package dev.hytalezombie.spawn;
 
 import dev.hytalezombie.model.Vector3f;
-import dev.hytalezombie.HytaleZombiePlugin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("SpawnManager")
 class SpawnManagerTest {
-
-    @Mock
-    private HytaleZombiePlugin plugin;
-
-    @Mock
-    private Logger logger;
 
     private SpawnManager spawnManager;
 
@@ -38,8 +22,7 @@ class SpawnManagerTest {
 
     @BeforeEach
     void setUp() {
-        when(plugin.getLogger()).thenReturn(logger);
-        spawnManager = new SpawnManager(plugin);
+        spawnManager = new SpawnManager();
 
         nodeRoom1 = new SpawnNode("room_1", new Vector3f(10.0f, 0.0f, 10.0f), 2.0f);
         nodeRoom2 = new SpawnNode("room_2", new Vector3f(50.0f, 0.0f, 50.0f), 3.0f);
