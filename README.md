@@ -26,7 +26,7 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 .\gradlew.bat runServer
 ```
 
-> ?? **Important**: If the server was previously started, stale `.lck` lock files in `run\logs\` will cause a build error:
+> **Important**: If the server was previously started, stale `.lck` lock files in `run\logs\` will cause a build error:
 > ```
 > Failed to create MD5 hash for file: run\logs\..._server.log.lck
 > ```
@@ -92,7 +92,7 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 .\gradlew.bat runServer
 ```
 
-> ?? **Why this matters**: Hytale uses **QUIC (UDP)** for networking, not TCP. When multiple server processes bind to port 5520, your game client's packets can be delivered to **any** of the stale processes, causing auth failures. Always kill old processes before re-running.
+> **Why this matters**: Hytale uses **QUIC (UDP)** for networking, not TCP. When multiple server processes bind to port 5520, your game client's packets can be delivered to **any** of the stale processes, causing auth failures. Always kill old processes before re-running.
 
 ---
 
@@ -115,7 +115,7 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 .\gradlew.bat hytaleJvmDoctor       # Check JVM hot swap support
 
 # Testing
-.\gradlew.bat test                  # Run all 138 unit tests
+.\gradlew.bat test                  # Run all unit tests
 .\gradlew.bat test --tests "*GameSessionTest*"   # Run specific tests
 
 # Refresh dependencies if something fails
@@ -133,8 +133,8 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 | `/hytalezombie stop` | `/hz stop`, `/zombie stop` | Ends the current match |
 | `/hytalezombie round [n]` | `/hz round [n]` | Shows or sets the current round number |
 | `/hytalezombie info` | `/hz info` | Shows match status, round, active zombies, player count |
-| `/hz state` | ? | Full state dump (match, round, zombies, power-ups, config) |
-| `/hz nextround` | ? | Force-advance to next round (kills remaining zombies) |
+| `/hz state` | – | Full state dump (match, round, zombies, power-ups, config) |
+| `/hz nextround` | – | Force-advance to next round (kills remaining zombies) |
 
 ### Zombie Testing
 | Command | What It Does |
@@ -181,18 +181,18 @@ Requires the `hytalezombie.admin` permission.
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| ✅ Spawn system | ✅ | Interval-based zombie spawning at configurable spawn points |
-| ✅ Round progression | ✅ | Auto-advance with scaling difficulty (HP, speed, count) |
-| ✅ Economy / Points | ✅ | Points for hits/kills, spend on weapons, perks, doors |
-| ✅ Power-ups | ✅ | Nuke, Insta-Kill, Double Points, Max Ammo, Carpenter, etc. |
-| ✅ Zombie AI | ✅ | Zombies use Velocity-based movement with Hytale physics (gravity, collision); face nearest player |
-| ✅ Persistent HUD | ✅ | Scoreboard updates every second (round, zombies, points) |
-| ✅ Entity integration | ✅ | Hytale SDK entity spawning + damage routing via UUID; safe CommandBuffer-based entity removal |
-| ✅ 12 Perks | ✅ | Juggernog, Speed Cola, Quick Revive, etc. |
-| ✅ 7 Power-ups | ✅ | All classic zombie power-ups implemented |
-| ✅ Barriers | ✅ | Repair mechanics for window barriers |
-| ✅ Map zones | ✅ | Zone connectivity + door unlocking |
-| ✅ 138+ tests | ✅ | Unit tests for all core systems |
+| Spawn system | Done | Interval-based zombie spawning at configurable spawn points |
+| Round progression | Done | Auto-advance with scaling difficulty (HP, speed, count) |
+| Economy / Points | Done | Points for hits/kills, spend on weapons, perks, doors |
+| Power-ups | Done | Nuke, Insta-Kill, Double Points, Max Ammo, Carpenter, etc. |
+| Zombie AI | Done | NPC-based AI via Template_Aggressive_Zombies — built-in hostile pursuit, pathfinding, death animation; UUID-tracked |
+| Persistent HUD | Done | Scoreboard updates every second (round, zombies, points) |
+| Entity integration | Done | NPCPlugin spawning with custom hz_zombie role; UUID-based damage routing; NPC death system handles despawn; DropList:Empty = no loot |
+| 12 Perks | Done | Juggernog, Speed Cola, Quick Revive, etc. |
+| 7 Power-ups | Done | All classic zombie power-ups implemented |
+| Barriers | Done | Repair mechanics for window barriers |
+| Map zones | Done | Zone connectivity + door unlocking |
+| 245+ tests | Done | Unit tests for all core systems |
 
 ---
 
@@ -200,9 +200,9 @@ Requires the `hytalezombie.admin` permission.
 
 ### High-Level Flow
 
-1. **Run `/hz start`** ? marks spawn_room zone, starts round 1. No default spawns - use /hz setspawn to place them
+1. **Run `/hz start`** — marks spawn_room zone, starts round 1. No default spawns - use /hz setspawn to place them
 2. **Place spawn points** with `/hz setspawn <zone> <x> <y> <z>` to place spawn points at world coordinates
-3. **Game loop ticks 20 times/second** ? every 40 ticks (2 seconds), a zombie spawns at a random spawn point with a random offset inside its radius
+3. **Game loop ticks 20 times/second** — every 40 ticks (2 seconds), a zombie spawns at a random spawn point with a random offset inside its radius
 4. **Zombies keep spawning** until the total count for the round is reached
 5. **When all zombies are eliminated**, the round auto-advances
 6. **Round 2+** has more zombies with higher health and speed
@@ -211,11 +211,11 @@ Requires the `hytalezombie.admin` permission.
 
 | Round | Zombies (1 player) | HP | Speed |
 |-------|-------------------|----|-------|
-| 1 | 9 | 100 | 1.0? |
-| 2 | 11 | 115 | 1.05? |
-| 5 | 17 | ~175 | ~1.22? |
-| 10 | 27 | ~352 | ~1.55? |
-| 20 | 47 | ~1,424 | ~2.53? |
+| 1 | 9 | 100 | 1.0x |
+| 2 | 11 | 115 | 1.05x |
+| 5 | 17 | ~175 | ~1.22x |
+| 10 | 27 | ~352 | ~1.55x |
+| 20 | 47 | ~1,424 | ~2.53x |
 
 ### Points System
 
@@ -223,7 +223,7 @@ Requires the `hytalezombie.admin` permission.
 |--------|--------|--------------------|
 | Hit a zombie (not kill) | 10 | 20 |
 | Kill a zombie | 100 | 200 |
-| Starting points | 500 | ? |
+| Starting points | 500 | – |
 
 ---
 
@@ -236,8 +236,8 @@ All tunable values in `src/main/java/dev/hytalezombie/config/HytaleZombieConfig.
 | `startingPoints` | 500 | Points each player starts with |
 | `zombieBaseHealth` | 100.0 | Round 1 zombie HP |
 | `zombieBaseSpeed` | 1.0 | Round 1 zombie speed multiplier |
-| `healthScalingPerRound` | 1.15 | Each round, HP ? this (15% increase) |
-| `speedScalingPerRound` | 1.05 | Each round, speed ? this (5% increase) |
+| `healthScalingPerRound` | 1.15 | Each round, HP x this (15% increase) |
+| `speedScalingPerRound` | 1.05 | Each round, speed x this (5% increase) |
 | `pointsPerKill` | 100 | Points for killing a zombie |
 | `pointsPerHit` | 10 | Points for hitting a zombie |
 | `zombieSpawnBaseCount` | 5 | Minimum zombies per round |
@@ -250,58 +250,64 @@ All tunable values in `src/main/java/dev/hytalezombie/config/HytaleZombieConfig.
 
 ```
 src/
-??? main/
-?   ??? java/dev/hytalezombie/
-?   ?   ??? HytaleZombiePlugin.java       # Entry point + game loop + setupDefaultMap()
-?   ?   ??? commands/
-?   ?   ?   ??? HytaleZombieCommand.java  # /hytalezombie command handler
-?   ?   ??? config/
-?   ?   ?   ??? HytaleZombieConfig.java   # All tunable game values
-?   ?   ??? events/
-?   ?   ?   ??? PlayerConnectionListener.java
-?   ?   ??? manager/
-?   ?   ?   ??? BarrierManager.java       # Window barrier CRUD
-?   ?   ?   ??? DebugManager.java         # Debug mode + in-world visualization
-?   ?   ?   ??? GameManagerProvider.java  # Manager access interface
-?   ?   ?   ??? GameSession.java          # MAIN ORCHESTRATOR (tick, spawn, damage, economy, AI)
-?   ?   ??? ScoreboardManager.java    # Persistent HUD display (round/zombies/points)
-?   ?   ?   ??? PlayerDataManager.java    # Per-player state
-?   ?   ?   ??? RoundManager.java         # Round tracking + scaling math
-?   ?   ?   ??? WeaponRegistry.java       # Weapon definitions
-?   ?   ?   ??? ZoneManager.java          # Map zone connectivity + doors
-?   ?   ??? model/
-?   ?   ?   ??? Barrier.java              # Barrier state machine
-?   ?   ?   ??? MapZone.java              # Named zone with door cost
-?   ?   ?   ??? Perk.java                 # 12 perk definitions
-?   ?   ?   ??? PlayerData.java           # Points, kills, downs, alive
-?   ?   ?   ??? PowerUp.java              # Power-up types + durations
-?   ?   ?   ??? Vector3f.java             # Float 3D vector
-?   ?   ?   ??? Vector3i.java             # Int 3D vector
-?   ?   ?   ??? Weapon.java               # Weapon stats + Pack-a-Punch
-?   ?   ??? spawn/
-?   ?       ??? SpawnManager.java         # Spawn node registry + selection
-?   ?       ??? SpawnNode.java            # Single spawn point (zone, position, radius)
-?   ??? resources/
-?       ??? manifest.json                 # Plugin manifest
-??? test/
-    ??? java/dev/hytalezombie/
-        ??? manager/
-        ?   ??? BarrierManagerTest.java
-        ?   ??? GameSessionTest.java
-        ?   ??? PlayerDataManagerTest.java
-        ?   ??? RoundManagerTest.java
-        ?   ??? WeaponRegistryTest.java
-        ?   ??? ZoneManagerTest.java
-        ??? model/
-        ?   ??? BarrierTest.java
-        ?   ??? MapZoneTest.java
-        ?   ??? PerkTest.java
-        ?   ??? PlayerDataTest.java
-        ?   ??? PowerUpTest.java
-        ?   ??? WeaponTest.java
-        ??? spawn/
-            ??? SpawnManagerTest.java
-            ??? SpawnNodeTest.java
+  main/
+    java/dev/hytalezombie/
+      HytaleZombiePlugin.java       # Entry point + game loop + setupDefaultMap()
+      commands/
+        HytaleZombieCommand.java    # /hytalezombie command handler
+      config/
+        HytaleZombieConfig.java     # All tunable game values
+      entity/
+        EntitySpawnHelper.java      # NPCPlugin zombie spawning + postSpawn
+        ZombieDamageEventSystem.java # UUID-based damage routing
+        ZombieEntity.java           # Custom entity (extends LivingEntity)
+      events/
+        PlayerConnectionListener.java
+      manager/
+        BarrierManager.java         # Window barrier CRUD
+        DebugManager.java           # Debug mode + in-world visualization
+        GameManagerProvider.java    # Manager access interface
+        GameSession.java            # MAIN ORCHESTRATOR (tick, spawn, damage, economy, AI)
+        ScoreboardManager.java      # Persistent HUD display (round/zombies/points)
+        PlayerDataManager.java      # Per-player state
+        RoundManager.java           # Round tracking + scaling math
+        WeaponRegistry.java         # Weapon definitions
+        ZoneManager.java            # Map zone connectivity + doors
+      model/
+        Barrier.java                # Barrier state machine
+        MapZone.java                # Named zone with door cost
+        Perk.java                   # 12 perk definitions
+        PlayerData.java             # Points, kills, downs, alive
+        PowerUp.java                # Power-up types + durations
+        Vector3f.java               # Float 3D vector
+        Vector3i.java               # Int 3D vector
+        Weapon.java                 # Weapon stats + Pack-a-Punch
+      spawn/
+        SpawnManager.java           # Spawn node registry + selection
+        SpawnNode.java              # Single spawn point (zone, position, radius)
+    resources/
+      manifest.json                 # Plugin manifest
+      assets/hytalezombie/Server/NPC/Roles/hz_zombie.json  # NPC role (MODS distribution)
+      Server/NPC/Roles/hz_zombie.json    # NPC role (CLASSPATH dev)
+  test/
+    java/dev/hytalezombie/
+      manager/
+        BarrierManagerTest.java
+        GameSessionTest.java
+        PlayerDataManagerTest.java
+        RoundManagerTest.java
+        WeaponRegistryTest.java
+        ZoneManagerTest.java
+      model/
+        BarrierTest.java
+        MapZoneTest.java
+        PerkTest.java
+        PlayerDataTest.java
+        PowerUpTest.java
+        WeaponTest.java
+      spawn/
+        SpawnManagerTest.java
+        SpawnNodeTest.java
 ```
 
 ---
@@ -313,11 +319,11 @@ src/
 - **Test deps**: JUnit 5.11.0, Mockito 5.16.1, ByteBuddy 1.17.5
 
 The Hytale Gradle Plugin handles:
-- ? Manifest generation and validation
-- ? Server jar decompilation + IDE source attachment
-- ? Asset zip downloading and caching
-- ? Local dev server launch
-- ? Plugin packaging
+- Manifest generation and validation
+- Server jar decompilation + IDE source attachment
+- Asset zip downloading and caching
+- Local dev server launch
+- Plugin packaging
 
 ### Gradle Properties (`gradle.properties`)
 
@@ -337,8 +343,8 @@ Key properties to customize for your setup:
 
 | Issue | Solution |
 |-------|----------|
-| **Gradle sync fails** | Check Java 25 is installed and configured under **File ? Project Structure ? SDKs** |
-| **Plugin not loading** | Make sure commands are registered in `start()`, not `preLoad()` ? the plugin must be ENABLED first |
+| **Gradle sync fails** | Check Java 25 is installed and configured under **File > Project Structure > SDKs** |
+| **Plugin not loading** | Make sure commands are registered in `start()`, not `preLoad()` — the plugin must be ENABLED first |
 | **"The plugin ... is not enabled!"** | Move command/event registration from `preLoad()` to `start()` |
 | **Assets zip not found** | Set `hytaleHomeOverride` in `gradle.properties` to your Hytale install's `Assets.zip` |
 | **Symlink creation failed (Windows)** | The plugin falls back to Windows junctions; run terminal as Admin if needed |
@@ -346,7 +352,8 @@ Key properties to customize for your setup:
 | **Build fails with missing deps** | Run `.\gradlew.bat build --refresh-dependencies` |
 | **"Failed to create MD5 hash for file: ...server.log.lck"** | A stale lock file from a previous server session. Run `Remove-Item -Path "run\logs\*" -Force` then re-launch |
 | **"Server Auth Unavailable" when connecting** | Multiple stale server processes are fighting over port 5520. Run the cleanup steps in **Server Lifecycle** above to kill all old processes, then re-launch |
-| **Can't connect / connection refused** | Make sure the server has fully booted (look for `Hytale Server Booted!` in the logs). Try `localhost` without a port number ? the client defaults to 5520 |
+| **Can't connect / connection refused** | Make sure the server has fully booted (look for `Hytale Server Booted!` in the logs). Try `localhost` without a port number — the client defaults to 5520 |
+| **Zombie NPC role not found** | Ensure `hz_zombie.json` is at both `src/main/resources/Server/NPC/Roles/` (CLASSPATH dev) and `src/main/resources/assets/hytalezombie/Server/NPC/Roles/` (MODS distribution) |
 
 ---
 

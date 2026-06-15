@@ -600,6 +600,21 @@ src/main/java/dev/hytalezombie/
 ### ✅ Phase 4: Persistent Scoreboard / HUD
 **Feature**: `ScoreboardManager` sends periodic updates to all players every 20 ticks showing round, zombie count, and player points.
 
+### ✅ Phase 5: Fixed NPC Role Loading, Desync, and Loot Drops
+**Bug 1 (Role not found)**: `hz_zombie.json` referenced `Template_Creature` (doesn't exist). The NPCPlugin's `AssetRegistryLoader` loads from `src/main/resources/Server/` — the role was only at `assets/hytalezombie/Server/NPC/Roles/`, unreachable from the CLASSPATH dev path.
+
+**Fix 1**: Changed `Reference` to `Template_Aggressive_Zombies` (Hytale's actual zombie template). Copied role to `src/main/resources/Server/NPC/Roles/hz_zombie.json` for CLASSPATH dev loading. Used proper `Modify` structure matching Hytale's variant pattern. Removed custom Instructions/MotionControllers — the template provides all AI behavior.
+
+**Bug 2 (Desync)**: `ZombieDamageEventSystem` filtered by `npc.getRoleName() == "hz_zombie"`. During NPC death, the role name changes, causing the handler to lose track. Zombies became vanilla entities — dropping loot and not being cleaned up.
+
+**Fix 2**: Replaced role-name check with UUID-only filtering (`uuidToZombieId` map). UUID components never change during NPC lifecycle. Removed `buffer.removeEntity()` call — NPC death system handles death animation and despawn natively.
+
+**Bug 3 (Loot drops)**: Default `DropList: "Drop_Zombie"` in role template caused item drops on death.
+
+**Fix 3**: Set `DropList: "Empty"` in role JSON.
+
+**Feature**: Added `tickZombieAI()` cleanup for zombies whose entity refs become invalid (despawned by NPC system).
+
 ---
 
 ## Build System

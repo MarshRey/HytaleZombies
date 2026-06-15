@@ -346,12 +346,12 @@ public class GameSession {
     }
 
     /**
-     * Updates NPC blackboard targets so zombies pathfind toward the nearest player.
-     * The NPC system's BodyMotionPursue (defined in the hz_zombie role JSON) handles
-     * all movement, animation, gravity, and collision via MotionControllerWalk.
-     * We only need to set the marked target — no manual position-setting needed.
+     * Syncs logical zombie positions from their NPC TransformComponents.
+     * The NPC system's built-in AI (Template_Aggressive_Zombies) handles all
+     * hostile pursuit via Sensor Mob with LockOnTarget — no manual target
+     * setting needed. We only sync positions for display/tracking purposes.
      */
-    private static final int AI_SYNC_INTERVAL = 5;
+    private static final int AI_SYNC_INTERVAL = 10;
 
     private int aiSyncCounter;
 
@@ -361,44 +361,29 @@ public class GameSession {
         aiSyncCounter++;
         if (aiSyncCounter % AI_SYNC_INTERVAL != 0) return;
 
-        // Snapshot state for the world thread
+        // Snapshot active zombies for the world thread
         final Map<String, ZombieInstance> snapshot = new HashMap<>(activeZombies);
-        final Map<String, Vector3f> playerPosSnapshot = new HashMap<>(playerPositions);
-        final Map<String, Ref<EntityStore>> playerRefSnapshot = new HashMap<>(playerEntityRefs);
 
         world.execute(() -> {
             for (ZombieInstance zombie : snapshot.values()) {
                 if (!zombie.isAlive()) continue;
                 try {
-                    // Get the NPCEntity to access the Role for target assignment
-                    com.hypixel.hytale.server.npc.entities.NPCEntity npcEntity = zombie.getNpcEntity();
-                    if (npcEntity == null) continue;
-
-                    com.hypixel.hytale.server.npc.role.Role role = npcEntity.getRole();
-                    if (role == null) continue;
-
-                    // Find the nearest player to this zombie
-                    Vector3f zombiePos = zombie.getCurrentPosition();
-                    String nearestPlayerId = null;
-                    float nearestDistSq = Float.MAX_VALUE;
-
-                    for (Map.Entry<String, Vector3f> entry : playerPosSnapshot.entrySet()) {
-                        Vector3f playerPos = entry.getValue();
-                        float dx = playerPos.x() - zombiePos.x();
-                        float dz = playerPos.z() - zombiePos.z();
-                        float distSq = dx * dx + dz * dz;
-                        if (distSq < nearestDistSq) {
-                            nearestDistSq = distSq;
-                            nearestPlayerId = entry.getKey();
-                        }
-                    }
-
-                    // Set the NPC's marked target to the nearest player
-                    // BodyMotionPursue in the role JSON references TargetSlot "hz_target"
-                    if (nearestPlayerId != null) {
-                        Ref<EntityStore> playerRef = playerRefSnapshot.get(nearestPlayerId);
-                        if (playerRef != null && playerRef.isValid()) {
-                            role.setMarkedTarget("hz_target", playerRef);
+                    // Check if the entity ref is still valid. If not, the NPC
+                    // system has despawned this entity (death animation completed,
+                    // or other removal). Clean up tracking.
+                    if (zombie.getEntityRef().isPresent()) {
+                        Ref<EntityStore> ref = zombie.getEntityRef().get();
+                        if (!ref.isValid()) {
+                            // Entity was despawned by the NPC system — remove tracking
+                            zombie.damage(zombie.getHealth()); // mark as dead
+                            activeZombies.remove(zombie.getId());
+                            if (zombie.getEntityUuid() != null) {
+                                uuidToZombieId.remove(zombie.getEntityUuid());
+                            }
+                            roundManager.decrementActiveZombies();
+                            LOGGER.log(Level.FINE, "Zombie {0} entity despawned by server — cleaned up tracking",
+                                    zombie.getId());
+                            return;
                         }
                     }
 
@@ -412,7 +397,6 @@ public class GameSession {
                                 (float) pos.x(), (float) pos.y(), (float) pos.z()));
                         }
                     });
-
                 } catch (Exception e) {
                     // Entity may have been removed — safe to skip
                 }

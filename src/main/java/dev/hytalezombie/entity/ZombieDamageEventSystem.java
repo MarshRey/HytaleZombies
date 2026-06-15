@@ -75,24 +75,18 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
             @Nonnull CommandBuffer<EntityStore> buffer,
             @Nonnull Damage damage
     ) {
-        // Get the NPCEntity component and filter by our zombie role
-        NPCEntity npc = chunk.getComponent(index, NPCEntity.getComponentType());
-        if (npc == null) return;
-
-        // Only process NPCs that use our zombie role
-        if (!EntitySpawnHelper.ZOMBIE_ROLE.equals(npc.getRoleName())) return;
-
-        // Use the UUID component for reliable lookup
+        // Identify zombies by UUID — the UUID component never changes during
+        // the NPC lifecycle, even during death. We avoid filtering by NPCEntity
+        // role name because the role can change during state transitions (death),
+        // which would cause zombies to desync from our game manager.
         UUIDComponent uuidComp = chunk.getComponent(index, UUIDComponent.getComponentType());
         if (uuidComp == null) return;
 
         String zombieId = gameSession.getZombieIdByUuid(uuidComp.getUuid()).orElse(null);
         if (zombieId == null) {
-            // Zombie not tracked by our game session
+            // Not one of our tracked zombies
             return;
         }
-
-        int networkId = npc.getNetworkId();
 
         float damageAmount = damage.getAmount();
 
@@ -118,15 +112,15 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
         // Fallback: if we can't identify the attacker, still record damage
         String resolvedPlayerId = attackerPlayerId != null ? attackerPlayerId : "unknown";
 
-        // Forward to the game session for damage tracking, points, and kill handling
+        // Forward to the game session for damage tracking, points, and kill handling.
+        // We do NOT call buffer.removeEntity() here — the Hytale NPC death system
+        // handles the death animation and entity despawn natively.
         boolean killed = gameSession.damageZombie(zombieId, damageAmount, resolvedPlayerId);
 
         if (killed) {
-            // Use CommandBuffer for safe entity removal during ECS iteration.
-            // This avoids concurrent modification of the entity store that would
-            // occur if removeEntity() were called directly during system execution.
-            Ref<EntityStore> entityRef = chunk.getReferenceTo(index);
-            buffer.removeEntity(entityRef, RemoveReason.REMOVE);
+            // Try to get the NPCEntity for logging purposes only
+            NPCEntity npc = chunk.getComponent(index, NPCEntity.getComponentType());
+            int networkId = npc != null ? npc.getNetworkId() : -1;
 
             LOGGER.log(Level.FINE, "ZombieDamageEventSystem: zombie {0} (networkId={1}) killed by player {2}",
                     new Object[]{zombieId, networkId, resolvedPlayerId});
