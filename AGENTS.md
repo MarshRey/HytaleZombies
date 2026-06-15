@@ -619,24 +619,17 @@ src/main/java/dev/hytalezombie/
 
 ## 🗺️ Map Prefabs (Minecraft → Hytale)
 
-Map prefabs are handled by **Hytale's built-in prefab system** — no custom code needed.
+Map import is handled by the **SchematicImporter** mod (`run/mods/SchematicImporter-1.1.0.jar`).
+No custom code needed — the mod converts `.schematic`/`.litematic` files to Hytale prefabs in-game.
 
 ### How to Import a Minecraft Map
 
-1. **Convert** your `.schematic` or `.litematic` using the official Hytale Converter:
-   - https://hytale.game/en/tutorial-convert-minecraft-schematic-hytale/
-   - This produces a `.prefab` file with correct Hytale block names
+1. **Place your `.schematic` or `.litematic` file** on the server (any accessible path).
 
-2. **Place the `.prefab` file** in the server's prefab directory:
-   ```
-   run\.cache\prefabs\Hytale_Hytale\Server\Prefabs\
-   ```
-   This directory is created automatically when you first place a prefab.
-   Do NOT create it manually.
+2. **Use the SchematicImporter mod's in-game commands** to convert and place the structure.
+   See the mod's documentation for exact command syntax.
 
-3. **Use the in-game Prefab Tool or Builder Tool** to place the structure in the world.
-
-4. **Set up spawn nodes** around the placed structure using `/hz setspawn`.
+3. **Set up spawn nodes** around the placed structure using `/hz setspawn`.
 
 ---
 

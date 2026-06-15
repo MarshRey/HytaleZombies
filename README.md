@@ -154,15 +154,12 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 
 ### Map Prefabs
 
-Map structures are handled by Hytale's built-in prefab system now. 
+Map import is handled by the **SchematicImporter** mod (`run/mods/SchematicImporter-1.1.0.jar`).
 
 **To import a Minecraft map:**
-1. Convert your `.schematic`/`.litematic` using the official Hytale Converter:
-   - https://hytale.game/en/tutorial-convert-minecraft-schematic-hytale/
-2. Place the resulting `.prefab` file in the server's prefab directory:
-   - `run\.cache\prefabs\Hytale_Hytale\Server\Prefabs\`
-3. Use the in-game Prefab Tool or Builder Tool to place the structure
-4. Set up spawn nodes with `/hz setspawn` around the placed structure
+1. Place your `.schematic` or `.litematic` file on the server
+2. Use the SchematicImporter mod's in-game commands to convert and place the structure
+3. Set up spawn nodes with `/hz setspawn` around the placed structure
 
 ### Map Setup Commands
 | Command | What It Does |

@@ -275,18 +275,15 @@ public class HytaleZombiePlugin extends JavaPlugin {
      * Sets up a default test map with basic zones, spawn nodes, and barriers.
      * Call this after starting a match to have a playable layout.
      *
-     * <p>Map prefabs are handled by Hytale's built-in prefab system.
-     * Place your .prefab files in the server's prefab directory:</p>
-     * <pre>{@code run\.cache\prefabs\Hytale_Hytale\Server\Prefabs}</pre>
-     * <p>Then use the in-game Builder Tool or Prefab Tool to place them.</p>
+     * <p>Map import is handled by the SchematicImporter mod.
+     * Place .schematic/.litematic files on the server and use the mod's commands.</p>
      */
     public void setupDefaultMap() {
         spawnManager.clearAllNodes();
         spawnManager.markZoneOccupied("spawn_room");
 
         getLogger().at(Level.INFO).log(
-            "Default map zone marked. Prefabs are loaded via Hytale's built-in prefab system. "
-            + "Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/"
+            "Default map zone marked. Use the SchematicImporter mod to import .schematic/.litematic files."
         );
     }
 
