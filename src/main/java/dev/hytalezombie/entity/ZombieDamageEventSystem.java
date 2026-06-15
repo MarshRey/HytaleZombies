@@ -12,6 +12,8 @@ import com.hypixel.hytale.server.core.modules.entity.damage.Damage;
 import com.hypixel.hytale.server.core.modules.entity.damage.DamageEventSystem;
 import com.hypixel.hytale.server.core.modules.entity.damage.DamageModule;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.server.npc.entities.NPCEntity;
+import dev.hytalezombie.entity.EntitySpawnHelper;
 import dev.hytalezombie.manager.GameSession;
 
 import javax.annotation.Nonnull;
@@ -39,12 +41,13 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
     }
 
     /**
-     * Query for entities that have the {@link ZombieEntity} component.
+     * Query for entities that have the {@link NPCEntity} component.
+     * We filter by role name in {@link #handle} to only process our zombies.
      */
     @Nonnull
     @Override
     public Query<EntityStore> getQuery() {
-        return ZombieEntity.getComponentType();
+        return NPCEntity.getComponentType();
     }
 
     /**
@@ -72,22 +75,24 @@ public class ZombieDamageEventSystem extends DamageEventSystem {
             @Nonnull CommandBuffer<EntityStore> buffer,
             @Nonnull Damage damage
     ) {
-        // Get the ZombieEntity component from the chunk
-        ZombieEntity zombie = chunk.getComponent(index, ZombieEntity.getComponentType());
-        if (zombie == null) return;
+        // Get the NPCEntity component and filter by our zombie role
+        NPCEntity npc = chunk.getComponent(index, NPCEntity.getComponentType());
+        if (npc == null) return;
 
-        // Use the UUID component for reliable lookup (set synchronously during spawn,
-        // avoiding the async race condition of networkId-based lookup).
+        // Only process NPCs that use our zombie role
+        if (!EntitySpawnHelper.ZOMBIE_ROLE.equals(npc.getRoleName())) return;
+
+        // Use the UUID component for reliable lookup
         UUIDComponent uuidComp = chunk.getComponent(index, UUIDComponent.getComponentType());
         if (uuidComp == null) return;
 
         String zombieId = gameSession.getZombieIdByUuid(uuidComp.getUuid()).orElse(null);
         if (zombieId == null) {
-            // Zombie not tracked by our game session (might be from another plugin or test)
+            // Zombie not tracked by our game session
             return;
         }
 
-        int networkId = zombie.getNetworkId();
+        int networkId = npc.getNetworkId();
 
         float damageAmount = damage.getAmount();
 

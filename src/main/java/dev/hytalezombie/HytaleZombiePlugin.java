@@ -164,6 +164,8 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 playerDataManager.getOrCreatePlayerData(playerId);
                 // Store the player's entity ref for position tracking
                 playerEntityRefs.put(playerId, event.getPlayerRef());
+                // Also forward to GameSession for NPC blackboard target assignment
+                gameSession.updatePlayerEntityRef(playerId, event.getPlayerRef());
                 // Send welcome message using PlayerRef from the store
                 com.hypixel.hytale.server.core.universe.PlayerRef playerRef = 
                     event.getPlayerRef().getStore()

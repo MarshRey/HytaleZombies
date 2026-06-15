@@ -1,0 +1,45 @@
+{
+    "Type": "Variant",
+    "Reference": "Template_Creature",
+    "MaxHealth": 100,
+    "Appearance": "model:Zombie",
+    "StartState": "default",
+    "MotionControllers": {
+        "walk": {
+            "Type": "Walk",
+            "WalkSpeed": 1.0,
+            "SprintSpeed": 2.0
+        }
+    },
+    "InitialMotionController": "walk",
+    "Instructions": [
+        {
+            "Type": "Instruction",
+            "Name": "pursue_target",
+            "Weight": 1.0,
+            "Sensor": {
+                "Type": "SensorHasMarkedTarget",
+                "TargetSlot": "hz_target"
+            },
+            "BodyMotion": {
+                "Type": "BodyMotionPursue",
+                "TargetSlot": "hz_target",
+                "Speed": 1.0
+            }
+        },
+        {
+            "Type": "Instruction",
+            "Name": "idle_wander",
+            "Weight": 0.5,
+            "Sensor": {
+                "Type": "SensorRandom",
+                "Chance": 0.15
+            },
+            "BodyMotion": {
+                "Type": "BodyMotionWander",
+                "Speed": 0.5,
+                "Radius": 5.0
+            }
+        }
+    ]
+}

@@ -2,12 +2,7 @@ package dev.hytalezombie.manager;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
-import com.hypixel.hytale.component.Store;
-import com.hypixel.hytale.math.vector.Rotation3f;
-import com.hypixel.hytale.protocol.MovementStates;
-import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
-import com.hypixel.hytale.server.core.modules.physics.component.Velocity;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.config.HytaleZombieConfig;
@@ -69,6 +64,8 @@ public class GameSession {
 
     // Player position tracking for zombie AI targeting
     private final Map<String, Vector3f> playerPositions;
+    // Player entity refs for NPC blackboard target assignment
+    private final Map<String, Ref<EntityStore>> playerEntityRefs;
 
     /**
      * Logical representation of a zombie in the game.
@@ -88,6 +85,7 @@ public class GameSession {
         private int networkId;
         private UUID entityUuid;
         private Ref<EntityStore> entityRef;
+        private com.hypixel.hytale.server.npc.entities.NPCEntity npcEntity;
 
         public ZombieInstance(String id, float health, float speed, Vector3f spawnPosition) {
             this(id, null, health, speed, spawnPosition);
@@ -126,6 +124,9 @@ public class GameSession {
         public void setEntityUuid(@Nullable UUID entityUuid) { this.entityUuid = entityUuid; }
         public Optional<Ref<EntityStore>> getEntityRef() { return Optional.ofNullable(entityRef); }
         public void setEntityRef(@Nullable Ref<EntityStore> entityRef) { this.entityRef = entityRef; }
+        @Nullable
+        public com.hypixel.hytale.server.npc.entities.NPCEntity getNpcEntity() { return npcEntity; }
+        public void setNpcEntity(@Nullable com.hypixel.hytale.server.npc.entities.NPCEntity npcEntity) { this.npcEntity = npcEntity; }
 
         public void damage(float amount) {
             this.health -= amount;
@@ -172,6 +173,7 @@ public class GameSession {
         this.networkIdToZombieId = new ConcurrentHashMap<>();
         this.uuidToZombieId = new ConcurrentHashMap<>();
         this.playerPositions = new ConcurrentHashMap<>();
+        this.playerEntityRefs = new ConcurrentHashMap<>();
     }
 
     // ==================== MATCH LIFECYCLE ====================
@@ -306,35 +308,36 @@ public class GameSession {
         float health = roundManager.getScaledZombieHealth();
         float speed = roundManager.getScaledZombieSpeed();
         String zombieId = "zombie_" + tickCounter + "_" + UUID.randomUUID().toString().substring(0, 8);
-        UUID entityUuid = UUID.randomUUID();
 
         ZombieInstance zombie = new ZombieInstance(zombieId, health, speed, position);
-        zombie.setEntityUuid(entityUuid);
 
-        // Register the UUID mapping IMMEDIATELY (before the async entity spawn)
-        // This ensures ZombieDamageEventSystem can always find this zombie via UUID,
-        // even if damage arrives before the async callback sets the networkId mapping.
-        uuidToZombieId.put(entityUuid, zombieId);
-
-        // Attempt to spawn a real Hytale entity if we have a world reference
+        // Attempt to spawn a real Hytale NPC entity if we have a world reference.
+        // UUID is assigned by NPCPlugin; we read it back from the SpawnResult.
         if (world != null) {
-            // spawnZombie is now async (enqueued on world thread via world.execute()).
-            // Pass the pre-generated UUID so the entity's UUIDComponent matches our mapping.
-            EntitySpawnHelper.spawnZombie(world, position, EntitySpawnHelper.getRandomZombieModel(), entityUuid)
+            final String finalZombieId = zombieId;
+            EntitySpawnHelper.spawnZombie(world, position, EntitySpawnHelper.getRandomZombieModel())
                 .thenAccept(result -> {
                     if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
                         zombie.setNetworkId(result.networkId());
                         zombie.setEntityRef(result.entityRef());
-                        networkIdToZombieId.put(result.networkId(), zombieId);
-                        LOGGER.log(Level.FINE, "Spawned real Hytale zombie entity (networkId={0}) for {1}",
-                                new Object[]{result.networkId(), zombieId});
+                        zombie.setNpcEntity(result.npcEntity());
+                        // Use the UUID assigned by NPCPlugin
+                        if (result.entityUuid() != null) {
+                            zombie.setEntityUuid(result.entityUuid());
+                            uuidToZombieId.put(result.entityUuid(), finalZombieId);
+                        }
+                        if (result.networkId() >= 0) {
+                            networkIdToZombieId.put(result.networkId(), finalZombieId);
+                        }
+                        LOGGER.log(Level.FINE, "Spawned zombie NPC (networkId={0}, role={1}) for {2}",
+                                new Object[]{result.networkId(), EntitySpawnHelper.ZOMBIE_ROLE, finalZombieId});
                     } else {
-                        LOGGER.log(Level.WARNING, "Failed to spawn Hytale entity for zombie {0} - created logical-only", zombieId);
+                        LOGGER.log(Level.WARNING, "Failed to spawn Hytale entity for zombie {0} - created logical-only", finalZombieId);
                     }
                 })
                 .exceptionally(ex -> {
                     LOGGER.log(Level.WARNING, "Error spawning Hytale entity for zombie {0}: {1}",
-                            new Object[]{zombieId, ex.getMessage()});
+                            new Object[]{finalZombieId, ex.getMessage()});
                     return null;
                 });
         }
@@ -343,181 +346,78 @@ public class GameSession {
     }
 
     /**
-     * Runs AI movement for all active zombies each tick.
-     * Moves each zombie toward the nearest target point at its current speed.
-     * Updates both logical position and the Hytale entity's TransformComponent.
+     * Updates NPC blackboard targets so zombies pathfind toward the nearest player.
+     * The NPC system's BodyMotionPursue (defined in the hz_zombie role JSON) handles
+     * all movement, animation, gravity, and collision via MotionControllerWalk.
+     * We only need to set the marked target — no manual position-setting needed.
      */
-    /** Ticks between world position syncs to reduce world thread load. */
     private static final int AI_SYNC_INTERVAL = 5;
-
-    /** Target point for zombies to move toward (will be replaced with nearest player). */
-    private static final Vector3f DEFAULT_AI_TARGET = new Vector3f(0, 0, 0);
 
     private int aiSyncCounter;
 
     private void tickZombieAI() {
-        if (activeZombies.isEmpty()) return;
+        if (activeZombies.isEmpty() || world == null) return;
 
         aiSyncCounter++;
+        if (aiSyncCounter % AI_SYNC_INTERVAL != 0) return;
 
-        // Determine target point: use nearest player if available,
-        // fall back to default (world origin)
-        Vector3f targetPoint = DEFAULT_AI_TARGET;
+        // Snapshot state for the world thread
+        final Map<String, ZombieInstance> snapshot = new HashMap<>(activeZombies);
+        final Map<String, Vector3f> playerPosSnapshot = new HashMap<>(playerPositions);
+        final Map<String, Ref<EntityStore>> playerRefSnapshot = new HashMap<>(playerEntityRefs);
 
-        // Process logical movement for all active zombies
-        float tickSpeed = 1.0f / 20.0f;
+        world.execute(() -> {
+            for (ZombieInstance zombie : snapshot.values()) {
+                if (!zombie.isAlive()) continue;
+                try {
+                    // Get the NPCEntity to access the Role for target assignment
+                    com.hypixel.hytale.server.npc.entities.NPCEntity npcEntity = zombie.getNpcEntity();
+                    if (npcEntity == null) continue;
 
-        for (ZombieInstance zombie : activeZombies.values()) {
-            if (!zombie.isAlive()) continue;
+                    com.hypixel.hytale.server.npc.role.Role role = npcEntity.getRole();
+                    if (role == null) continue;
 
-            // Find the nearest player to this zombie
-            Vector3f nearestTarget = targetPoint;
-            float nearestDistSq = Float.MAX_VALUE;
-            Vector3f zombiePos = zombie.getCurrentPosition();
+                    // Find the nearest player to this zombie
+                    Vector3f zombiePos = zombie.getCurrentPosition();
+                    String nearestPlayerId = null;
+                    float nearestDistSq = Float.MAX_VALUE;
 
-            for (Map.Entry<String, Vector3f> playerEntry : playerPositions.entrySet()) {
-                Vector3f playerPos = playerEntry.getValue();
-                float pdx = playerPos.x() - zombiePos.x();
-                float pdz = playerPos.z() - zombiePos.z();
-                float distSq = pdx * pdx + pdz * pdz;
-                if (distSq < nearestDistSq) {
-                    nearestDistSq = distSq;
-                    nearestTarget = playerPos;
-                }
-            }
-
-            // Move toward the nearest target
-            float dx = nearestTarget.x() - zombiePos.x();
-            float dz = nearestTarget.z() - zombiePos.z();
-            float dist = (float) Math.sqrt(dx * dx + dz * dz);
-
-            if (dist < 0.5f) continue;
-
-            float moveAmount = zombie.getSpeed() * tickSpeed;
-            float nx = dx / dist * moveAmount;
-            float nz = dz / dist * moveAmount;
-
-            if (nx * nx + nz * nz > dist * dist) {
-                zombie.setCurrentPosition(new Vector3f(nearestTarget.x(), zombiePos.y(), nearestTarget.z()));
-            } else {
-                zombie.setCurrentPosition(new Vector3f(zombiePos.x() + nx, zombiePos.y(), zombiePos.z() + nz));
-            }
-        }
-
-        // Sync entity positions and movement states on the world thread.
-        // Only sync every AI_SYNC_INTERVAL ticks to avoid saturating the world thread.
-        // Uses direct position-setting (X/Z only) instead of Velocity component because
-        // LivingEntity types in Hytale do not have an automatic physics system that
-        // reads Velocity and updates TransformComponent. Gravity is applied manually
-        // when the entity is not on ground.
-        if (world != null && aiSyncCounter % AI_SYNC_INTERVAL == 0) {
-            // Snapshot the map to avoid concurrent modification issues
-            final Map<String, ZombieInstance> snapshot = new HashMap<>(activeZombies);
-            // Capture player positions for target computation on the world thread
-            final Map<String, Vector3f> playerPosSnapshot = new HashMap<>(playerPositions);
-            final float dt = AI_SYNC_INTERVAL / 20.0f; // seconds elapsed since last sync
-            final float gravity = 20.0f; // blocks/sec^2 — applied when not on ground
-            world.execute(() -> {
-                for (ZombieInstance zombie : snapshot.values()) {
-                    if (!zombie.isAlive()) continue;
-                    try {
-                        zombie.getEntityRef().ifPresent(ref -> {
-                            if (!ref.isValid()) return;
-                            final Store<EntityStore> store = ref.getStore();
-                            final TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
-                            if (transform == null) return;
-
-                            // Find nearest player target for this zombie
-                            Vector3f target = DEFAULT_AI_TARGET;
-                            float nearestDistSq = Float.MAX_VALUE;
-                            Vector3f zombiePos = zombie.getCurrentPosition();
-
-                            for (Map.Entry<String, Vector3f> playerEntry : playerPosSnapshot.entrySet()) {
-                                Vector3f playerPos = playerEntry.getValue();
-                                float pdx = playerPos.x() - zombiePos.x();
-                                float pdz = playerPos.z() - zombiePos.z();
-                                float distSq = pdx * pdx + pdz * pdz;
-                                if (distSq < nearestDistSq) {
-                                    nearestDistSq = distSq;
-                                    target = playerPos;
-                                }
-                            }
-
-                            // === Read current state from Hytale ===
-                            final org.joml.Vector3d currentPos = transform.getPosition();
-                            final MovementStatesComponent movementStatesComp =
-                                store.getComponent(ref, MovementStatesComponent.getComponentType());
-                            final MovementStates states = movementStatesComp != null
-                                ? movementStatesComp.getMovementStates() : null;
-
-                            // Sync logical position from actual Hytale transform
-                            final Vector3f logicalPos = new Vector3f(
-                                (float) currentPos.x(), (float) currentPos.y(), (float) currentPos.z());
-                            zombie.setCurrentPosition(logicalPos);
-
-                            // Compute direction to target (horizontal only)
-                            final float dx = target.x() - logicalPos.x();
-                            final float dz = target.z() - logicalPos.z();
-                            final float dist = (float) Math.sqrt(dx * dx + dz * dz);
-
-                            // === Determine new position ===
-                            double newX = currentPos.x();
-                            double newY = currentPos.y();
-                            double newZ = currentPos.z();
-
-                            if (dist >= 0.5f) {
-                                final float nx = dx / dist;
-                                final float nz = dz / dist;
-                                final float speed = zombie.getSpeed();
-                                final float moveAmount = speed * dt;
-
-                                newX = currentPos.x() + nx * moveAmount;
-                                newZ = currentPos.z() + nz * moveAmount;
-
-                                // Set rotation to face movement direction (Minecraft yaw convention)
-                                final float yaw = (float) Math.toDegrees(Math.atan2(-nx, nz));
-                                transform.setRotation(new Rotation3f(0, yaw, 0));
-
-                                // Update movement states for walking animation
-                                if (states != null) {
-                                    states.walking = true;
-                                    states.running = speed > 1.5f;
-                                    states.idle = false;
-                                    states.horizontalIdle = false;
-                                }
-                            } else {
-                                // Close enough — set idle
-                                if (states != null) {
-                                    states.walking = false;
-                                    states.idle = true;
-                                    states.horizontalIdle = true;
-                                }
-                            }
-
-                            // === Apply gravity ===
-                            // Apply downward acceleration when the entity is not on ground,
-                            // but clamp to a minimum Y (spawn height minus a safety margin)
-                            // to prevent infinite falling if onGround is never set by Hytale.
-                            final double minY = zombie.getSpawnPosition().y() - 2.0;
-                            if (states != null && !states.onGround && currentPos.y() > minY) {
-                                newY = Math.max(minY, currentPos.y() - gravity * dt * dt);
-                                states.falling = true;
-                            } else if (states != null) {
-                                states.falling = false;
-                            }
-
-                            // === Write position back ===
-                            transform.setPosition(new org.joml.Vector3d(newX, newY, newZ));
-
-                            // Update logical position
-                            zombie.setCurrentPosition(new Vector3f((float) newX, (float) newY, (float) newZ));
-                        });
-                    } catch (Exception e) {
-                        // Entity may have been removed— safe to skip
+                    for (Map.Entry<String, Vector3f> entry : playerPosSnapshot.entrySet()) {
+                        Vector3f playerPos = entry.getValue();
+                        float dx = playerPos.x() - zombiePos.x();
+                        float dz = playerPos.z() - zombiePos.z();
+                        float distSq = dx * dx + dz * dz;
+                        if (distSq < nearestDistSq) {
+                            nearestDistSq = distSq;
+                            nearestPlayerId = entry.getKey();
+                        }
                     }
+
+                    // Set the NPC's marked target to the nearest player
+                    // BodyMotionPursue in the role JSON references TargetSlot "hz_target"
+                    if (nearestPlayerId != null) {
+                        Ref<EntityStore> playerRef = playerRefSnapshot.get(nearestPlayerId);
+                        if (playerRef != null && playerRef.isValid()) {
+                            role.setMarkedTarget("hz_target", playerRef);
+                        }
+                    }
+
+                    // Sync logical position from the NPC's actual TransformComponent
+                    zombie.getEntityRef().ifPresent(ref -> {
+                        if (!ref.isValid()) return;
+                        TransformComponent transform = ref.getStore().getComponent(ref, TransformComponent.getComponentType());
+                        if (transform != null) {
+                            org.joml.Vector3d pos = transform.getPosition();
+                            zombie.setCurrentPosition(new Vector3f(
+                                (float) pos.x(), (float) pos.y(), (float) pos.z()));
+                        }
+                    });
+
+                } catch (Exception e) {
+                    // Entity may have been removed — safe to skip
                 }
-            });
-        }
+            }
+        });
     }
 
     /**
@@ -927,6 +827,14 @@ public class GameSession {
      */
     public void removePlayerPosition(@Nonnull String playerId) {
         playerPositions.remove(playerId);
+        playerEntityRefs.remove(playerId);
+    }
+
+    /**
+     * Updates a player's entity ref for NPC blackboard target assignment.
+     */
+    public void updatePlayerEntityRef(@Nonnull String playerId, @Nonnull Ref<EntityStore> playerRef) {
+        playerEntityRefs.put(playerId, playerRef);
     }
 
     /**
