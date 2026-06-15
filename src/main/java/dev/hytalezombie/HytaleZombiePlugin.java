@@ -24,6 +24,7 @@ import dev.hytalezombie.spawn.SpawnNode;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -361,10 +362,22 @@ public class HytaleZombiePlugin extends JavaPlugin {
      * @param originZ    world Z coordinate for the prefab origin
      */
     public void loadMap(@Nonnull Path prefabPath, int originX, int originY, int originZ) {
-        // Resolve relative paths against the plugin's data directory
+        // Resolve relative paths against the plugin's data directory.
+        // Falls back to current working directory if the resolved path doesn't exist.
         Path resolvedPath = prefabPath;
         if (!prefabPath.isAbsolute()) {
-            resolvedPath = getDataDirectory().resolve(prefabPath);
+            Path dataDirPath = getDataDirectory().resolve(prefabPath);
+            if (Files.exists(dataDirPath)) {
+                resolvedPath = dataDirPath;
+            } else {
+                // Fallback: try relative to CWD (where the server was launched)
+                if (Files.exists(prefabPath)) {
+                    resolvedPath = prefabPath;
+                } else {
+                    // Neither exists — use data dir path so error message shows full path
+                    resolvedPath = dataDirPath;
+                }
+            }
         }
 
         try {
