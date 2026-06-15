@@ -20,7 +20,6 @@ import dev.hytalezombie.spawn.SpawnNode;
 
 import org.joml.Vector3d;
 
-import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Optional;
@@ -105,9 +104,8 @@ public class HytaleZombieCommand extends AbstractCommand {
                 ctx.sendMessage(Message.raw("[HytaleZombie] Default test map set up with spawn nodes."));
                 break;
 
-            case "loadmap":
-                handleLoadMap(ctx, args);
-                break;
+            // Map prefabs are now handled by Hytale's built-in prefab system.
+            // Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/
 
             case "setspawn":
                 handleSetSpawn(ctx, args);
@@ -214,7 +212,7 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("=== HytaleZombie Commands ==="));
         ctx.sendMessage(Message.raw("Match: /hz start | stop | round [n] | nextround | info | state"));
         ctx.sendMessage(Message.raw("Map Setup:"));
-        ctx.sendMessage(Message.raw("  /hz loadmap <path> [x] [y] [z]        - Import a Minecraft schematic (.prefab.json)"));
+        ctx.sendMessage(Message.raw("  Prefabs: Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/"));
         ctx.sendMessage(Message.raw("Spawn Points:"));
         ctx.sendMessage(Message.raw("  /hz setspawn <zone> [radius]          - Add spawn at 0,0,0"));
         ctx.sendMessage(Message.raw("  /hz setspawn <zone> <x> <y> <z> [r]  - Add spawn at coords"));
@@ -242,49 +240,6 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("  /hz config [key] [value]              - View/set config"));
         ctx.sendMessage(Message.raw("  /hz state                             - Full game state dump"));
         ctx.sendMessage(Message.raw("Tip: /hz setspawn spawn_room 10.5 0 -20.3 4.0"));
-    }
-
-    // ========================================================================
-    //  MAP LOADING
-    // ========================================================================
-
-    /**
-     * /hz loadmap <prefabPath> [originX] [originY] [originZ]
-     *
-     * Loads a Hytale prefab JSON map (converted from a Minecraft schematic)
-     * and places it into the world. Auto-configures spawn nodes around the structure.
-     *
-     * Default origin: 0, 64, 0 (sea level)
-     */
-    private void handleLoadMap(CommandContext ctx, String[] args) {
-        if (args.length < 2) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz loadmap <prefabPath> [originX] [originY] [originZ]"));
-            ctx.sendMessage(Message.raw("  Example: /hz loadmap maps/nacht_der_untoten.prefab.json 0 64 0"));
-            ctx.sendMessage(Message.raw("  Convert a schematic first: python tools/converter/schematic_converter.py --input map.schematic --output map.prefab.json"));
-            return;
-        }
-
-        String pathStr = args[1];
-        int originX = 0, originY = 64, originZ = 0;
-
-        if (args.length >= 5) {
-            try {
-                originX = Integer.parseInt(args[2]);
-                originY = Integer.parseInt(args[3]);
-                originZ = Integer.parseInt(args[4]);
-            } catch (NumberFormatException e) {
-                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use integers."));
-                return;
-            }
-        }
-
-        ctx.sendMessage(Message.raw("[HytaleZombie] Loading map: " + pathStr + " at (" + originX + "," + originY + "," + originZ + ")..."));
-
-        Path prefabPath = Path.of(pathStr);
-        plugin.loadMap(prefabPath, originX, originY, originZ);
-
-        ctx.sendMessage(Message.raw("[HytaleZombie] Map loaded! Use /hz map to set up spawn nodes, then /hz start to begin."));
-        ctx.sendMessage(Message.raw("[HytaleZombie] Player spawn point is at map center. Use /hz setspawn to customize spawn nodes."));
     }
 
     // ========================================================================

@@ -9,23 +9,17 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.task.TaskRegistration;
-import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.commands.HytaleZombieCommand;
 import dev.hytalezombie.config.HytaleZombieConfig;
 import dev.hytalezombie.entity.ZombieDamageEventSystem;
 import dev.hytalezombie.entity.ZombieEntity;
 import dev.hytalezombie.manager.*;
-import dev.hytalezombie.map.MapLoader;
 import dev.hytalezombie.model.Vector3f;
 import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.spawn.SpawnNode;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,11 +49,6 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
     // Player entity refs for position tracking (playerId -> entityRef)
     private final Map<String, Ref<EntityStore>> playerEntityRefs;
-
-    // Map loading
-    private MapLoader.PrefabData loadedMapPrefab;
-    private MapLoader.PrefabBounds loadedMapBounds;
-    private boolean mapLoaded;
 
     // Game loop scheduling
     private ScheduledExecutorService gameLoopExecutor;
@@ -286,163 +275,19 @@ public class HytaleZombiePlugin extends JavaPlugin {
      * Sets up a default test map with basic zones, spawn nodes, and barriers.
      * Call this after starting a match to have a playable layout.
      *
-     * <p>If a prefab map has been loaded via {@link #loadMap(Path, int, int, int)},
-     * spawn nodes are automatically placed around the structure perimeter.</p>
+     * <p>Map prefabs are handled by Hytale's built-in prefab system.
+     * Place your .prefab files in the server's prefab directory:</p>
+     * <pre>{@code run\.cache\prefabs\Hytale_Hytale\Server\Prefabs}</pre>
+     * <p>Then use the in-game Builder Tool or Prefab Tool to place them.</p>
      */
     public void setupDefaultMap() {
         spawnManager.clearAllNodes();
         spawnManager.markZoneOccupied("spawn_room");
 
-        if (mapLoaded && loadedMapBounds != null) {
-            // Auto-configure spawn nodes around the loaded map structure
-            MapLoader.PrefabBounds b = loadedMapBounds;
-            float midX = (b.minX + b.maxX) / 2.0f;
-            float midZ = (b.minZ + b.maxZ) / 2.0f;
-            float y = b.minY + 1; // Spawn zombies on the floor level + 1
-
-            // Place spawn nodes at the four outer corners of the map
-            float pad = 8.0f; // Distance outside the structure
-            float outerMinX = b.minX - pad;
-            float outerMaxX = b.maxX + pad;
-            float outerMinZ = b.minZ - pad;
-            float outerMaxZ = b.maxZ + pad;
-
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(outerMinX, y, outerMinZ),
-                5.0f
-            ));
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(outerMaxX, y, outerMinZ),
-                5.0f
-            ));
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(outerMinX, y, outerMaxZ),
-                5.0f
-            ));
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(outerMaxX, y, outerMaxZ),
-                5.0f
-            ));
-            // Also add a node at the midpoint on each side
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(midX, y, outerMinZ),
-                5.0f
-            ));
-            spawnManager.registerSpawnNode(new SpawnNode(
-                "spawn_room",
-                new Vector3f(midX, y, outerMaxZ),
-                5.0f
-            ));
-
-            getLogger().at(Level.INFO).log(
-                "Default map: loaded prefab structure ({0}x{1}x{2}) with 6 auto-placed spawn nodes around perimeter.",
-                new Object[]{b.maxX - b.minX + 1, b.maxY - b.minY + 1, b.maxZ - b.minZ + 1}
-            );
-        } else {
-            getLogger().at(Level.INFO).log(
-                "Default map zone marked. No spawn nodes registered - use /hz setspawn to place your own, or /hz loadmap to import a structure."
-            );
-        }
-    }
-
-    /**
-     * Loads a Hytale prefab JSON map from disk and places it into the world.
-     *
-     * <p>The prefab must be in the format produced by the schematic_converter.py tool.
-     * Call this before {@link #setupDefaultMap()} to have spawn nodes auto-configured.</p>
-     *
-     * @param prefabPath path to the prefab JSON file
-     * @param originX    world X coordinate for the prefab origin
-     * @param originY    world Y coordinate for the prefab origin (floor level)
-     * @param originZ    world Z coordinate for the prefab origin
-     */
-    public void loadMap(@Nonnull Path prefabPath, int originX, int originY, int originZ) {
-        // Resolve relative paths against the plugin's data directory.
-        // Falls back to current working directory if the resolved path doesn't exist.
-        Path resolvedPath = prefabPath;
-        if (!prefabPath.isAbsolute()) {
-            Path dataDirPath = getDataDirectory().resolve(prefabPath);
-            if (Files.exists(dataDirPath)) {
-                resolvedPath = dataDirPath;
-            } else {
-                // Fallback: try relative to CWD (where the server was launched)
-                if (Files.exists(prefabPath)) {
-                    resolvedPath = prefabPath;
-                } else {
-                    // Neither exists — use data dir path so error message shows full path
-                    resolvedPath = dataDirPath;
-                }
-            }
-        }
-
-        try {
-            getLogger().at(Level.INFO).log("Loading map prefab: " + resolvedPath.toAbsolutePath());
-            loadedMapPrefab = MapLoader.loadPrefab(resolvedPath);
-
-            getLogger().at(Level.INFO).log("Prefab loaded: " + loadedMapPrefab.blocks.size()
-                + " blocks, bounds=" + loadedMapPrefab.width + "x"
-                + loadedMapPrefab.height + "x" + loadedMapPrefab.length
-                + ", unresolved=" + loadedMapPrefab.unresolvedCount);
-
-            if (gameSession.getWorld() == null) {
-                getLogger().at(Level.WARNING).log("World reference not available yet. Map prefab parsed but "
-                    + "not placed. It will be placed automatically when a player joins.");
-                mapLoaded = true;
-                loadedMapBounds = new MapLoader.PrefabBounds(
-                    originX, originY, originZ,
-                    originX + loadedMapPrefab.width - 1,
-                    originY + loadedMapPrefab.height - 1,
-                    originZ + loadedMapPrefab.length - 1
-                );
-                return;
-            }
-
-            World world = gameSession.getWorld();
-            MapLoader.PrefabData prefab = loadedMapPrefab;
-            int clearPad = 20;
-
-            getLogger().at(Level.INFO).log("Clearing terrain around structure...");
-            MapLoader.clearAreaAsync(world,
-                originX - clearPad, 0, originZ - clearPad,
-                originX + prefab.width + clearPad,
-                originY + prefab.height + clearPad,
-                originZ + prefab.length + clearPad
-            ).thenCompose(v -> {
-                getLogger().at(Level.INFO).log("Terrain cleared. Placing " + prefab.blocks.size() + " blocks...");
-                return MapLoader.placePrefabAsync(world, prefab, originX, originY, originZ);
-            }).thenAccept(bounds -> {
-                loadedMapBounds = bounds;
-                mapLoaded = true;
-                getLogger().at(Level.INFO).log("Map placed at (" + originX + "," + originY + "," + originZ
-                    + ") — bounds: (" + bounds.minX + "," + bounds.minY + "," + bounds.minZ
-                    + ") to (" + bounds.maxX + "," + bounds.maxY + "," + bounds.maxZ + ")");
-            }).exceptionally(ex -> {
-                getLogger().at(Level.SEVERE).log("Failed to place map: " + ex.getMessage());
-                ex.printStackTrace();
-                return null;
-            });
-
-        } catch (Exception e) {
-            getLogger().at(Level.SEVERE).log("Failed to load map: " + e.getClass().getName() + " - " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Returns the center floor position of the loaded map, or null if no map is loaded.
-     * This is a good position to teleport players to on join.
-     */
-    @Nullable
-    public Vector3f getMapSpawnPoint() {
-        if (loadedMapBounds != null) {
-            return loadedMapBounds.getCenterFloor().add(new Vector3f(0.5f, 1.0f, 0.5f));
-        }
-        return null;
+        getLogger().at(Level.INFO).log(
+            "Default map zone marked. Prefabs are loaded via Hytale's built-in prefab system. "
+            + "Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/"
+        );
     }
 
     /**
