@@ -19,6 +19,13 @@ public class Vector3f {
     public float y() { return y; }
     public float z() { return z; }
 
+    /**
+     * Returns a new Vector3f with each component added.
+     */
+    public Vector3f add(Vector3f other) {
+        return new Vector3f(x + other.x, y + other.y, z + other.z);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

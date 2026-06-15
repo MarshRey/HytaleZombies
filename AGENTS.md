@@ -617,6 +617,90 @@ src/main/java/dev/hytalezombie/
 
 ---
 
+## 🗺️ Map Loading System (Schematic Import)
+
+### Overview
+
+HytaleZombie can now import Minecraft `.schematic` / `.schem` / `.litematic` files and place them as playable maps in the Hytale world. The system consists of:
+
+1. **Python converter** (`tools/converter/schematic_converter.py`) — converts Minecraft schematics to Hytale prefab JSON
+2. **MapLoader.java** (`src/main/java/dev/hytalezombie/map/MapLoader.java`) — parses prefab JSON and places blocks in the world
+3. **Plugin integration** (`HytaleZombiePlugin.loadMap()`) — wires map loading into the plugin lifecycle
+4. **In-game command** (`/hz loadmap`) — loads maps from the server console
+
+### Pipeline
+
+```
+Minecraft .schematic ──► schematic_converter.py ──► .prefab.json ──► MapLoader.java ──► Hytale World
+                              │                          │                    │
+                         Block mapping               Hytale block names    BlockSection.set()
+                         (mappings/default.json)                          (world thread, batched)
+```
+
+### Step 1: Convert a Schematic
+
+```bash
+cd tools/converter
+python schematic_converter.py --input nacht_der_untoten.schematic --output nacht_der_untoten.prefab.json
+```
+
+Requires Python 3.9+ and `nbtlib`:
+```bash
+pip install nbtlib
+```
+
+### Step 2: Load in Hytale
+
+In-game (server console or admin):
+```
+/hz loadmap maps/nacht_der_untoten.prefab.json 0 64 0
+```
+
+Or programmatically from the plugin:
+```java
+plugin.loadMap(Path.of("maps/map.prefab.json"), 0, 64, 0);
+```
+
+### Step 3: Set Up Spawn Nodes
+
+After loading a map, run `/hz map` — `setupDefaultMap()` auto-places 6 spawn nodes around the structure perimeter (4 corners + 2 midpoints). Players can customize spawn nodes with `/hz setspawn`.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `tools/converter/schematic_converter.py` | Python converter: .schematic → Hytale prefab JSON |
+| `tools/converter/mappings/default.json` | Minecraft block → Hytale block name mappings |
+| `src/main/java/dev/hytalezombie/map/MapLoader.java` | Java class: parses prefab JSON, places blocks via Hytale API |
+| `HytaleZombiePlugin.loadMap()` | Plugin method: orchestrates loading + placement |
+| `HytaleZombiePlugin.getMapSpawnPoint()` | Returns center-floor position for player teleport |
+| `HytaleZombieCommand.handleLoadMap()` | `/hz loadmap` command handler |
+
+### Prefab JSON Format
+
+```json
+{
+  "version": 8,
+  "blockIdVersion": 8,
+  "blocks": [
+    {"x": 0, "y": 0, "z": 0, "name": "Rock_Stone"},
+    {"x": 1, "y": 0, "z": 0, "name": "Wood_Oak_Trunk"}
+  ]
+}
+```
+
+Block names are Hytale BlockType keys (e.g., `Rock_Stone`, `Wood_Oak_Trunk`, `Soil_Grass`). Empty blocks are omitted. The converter handles Minecraft→Hytale block mapping automatically.
+
+### Spawn Node Auto-Configuration
+
+When a map is loaded and `setupDefaultMap()` is called, 6 spawn nodes are placed:
+- 4 corners: outside the structure at `bounds ± 8` blocks
+- 2 midpoints: center of each long side
+- Y level: floor + 1 block
+- Spawn radius: 5.0 blocks per node
+
+---
+
 ## Build System
 
 - **Gradle** (Kotlin DSL) with Hytale-Tools plugin

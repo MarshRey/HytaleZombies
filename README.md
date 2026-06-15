@@ -152,6 +152,28 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 | `/hz giveweapon <player> <weapon_id>` | Gives a player a weapon without cost |
 | `/hz giveperk <player> <perk_type>` | Gives a player a perk without cost |
 
+### Map Import (Schematic → Hytale)
+
+| Command | What It Does |
+|---------|-------------|
+| `/hz loadmap <path> [x] [y] [z]` | Imports a converted Minecraft schematic (.prefab.json) into the world. Auto-configures spawn nodes around the structure. |
+| `/hz map` | Registers the default map with auto-placed spawn nodes (uses loaded prefab bounds if a map was imported) |
+
+**Full workflow:**
+```bash
+# 1. Convert your Minecraft schematic to Hytale prefab
+cd tools/converter
+python schematic_converter.py --input your_map.schematic --output ../../maps/your_map.prefab.json
+
+# 2. In-game: load the map at world origin (0, 64, 0)
+/hz loadmap maps/your_map.prefab.json 0 64 0
+
+# 3. Start the match (auto-places spawn nodes around the structure)
+/hz start
+```
+
+The converter requires Python 3.9+ and `nbtlib` (`pip install nbtlib`). See `tools/converter/` for the full tool and `tools/converter/mappings/default.json` for Minecraft→Hytale block mappings.
+
 ### Map Setup Commands
 | Command | What It Does |
 |---------|-------------|
@@ -192,6 +214,7 @@ Requires the `hytalezombie.admin` permission.
 | 7 Power-ups | Done | All classic zombie power-ups implemented |
 | Barriers | Done | Repair mechanics for window barriers |
 | Map zones | Done | Zone connectivity + door unlocking |
+| Map import | Done | Import Minecraft .schematic files via Python converter → Hytale prefab → in-game structure |
 | 245+ tests | Done | Unit tests for all core systems |
 
 ---
