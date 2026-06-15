@@ -2,7 +2,7 @@
 
 A round-based wave survival game mode for Hytale, inspired by Call of Duty Zombies. Players survive waves of increasingly difficult zombies, earn points, purchase weapons/upgrades, repair barriers, and unlock new areas of the map.
 
-The **core game logic is fully implemented** with **138 passing unit tests**. The spawning system, round progression, economy, power-ups, barriers, and map zones are all coded and tested.
+The **core game logic is fully implemented** with **245+ passing unit tests**. The spawning system, round progression, economy, power-ups, barriers, and map zones are all coded and tested.
 
 ---
 
@@ -133,6 +133,24 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 | `/hytalezombie stop` | `/hz stop`, `/zombie stop` | Ends the current match |
 | `/hytalezombie round [n]` | `/hz round [n]` | Shows or sets the current round number |
 | `/hytalezombie info` | `/hz info` | Shows match status, round, active zombies, player count |
+| `/hz state` | — | Full state dump (match, round, zombies, power-ups, config) |
+| `/hz nextround` | — | Force-advance to next round (kills remaining zombies) |
+
+### Zombie Testing
+| Command | What It Does |
+|---------|-------------|
+| `/hz spawnzombie [zone] [count]` | Spawns N zombie(s) manually, from a specific zone or randomly |
+| `/hz killall` | Kills all active zombies instantly |
+| `/hz zombieinfo` | Lists all active zombies with HP, speed, and position |
+| `/hz spawninfo` | Shows spawn progress (spawned/killed/remaining this round) |
+
+### Economy & Items
+| Command | What It Does |
+|---------|-------------|
+| `/hz points [player] [amount]` | Shows or sets a player's points |
+| `/hz powerup <type>` | Activates a power-up (nuke, instakill, doublepoints, maxammo, etc.) |
+| `/hz giveweapon <player> <weapon_id>` | Gives a player a weapon without cost |
+| `/hz giveperk <player> <perk_type>` | Gives a player a perk without cost |
 
 ### Map Setup Commands
 | Command | What It Does |
@@ -140,12 +158,20 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 | `/hz map` | Registers the default test map with spawn nodes |
 | `/hz setspawn <zone> [radius]` | Adds a spawn point at (0,0,0) for a zone |
 | `/hz setspawn <zone> <x> <y> <z> [r]` | Adds a spawn point at specific coordinates |
-| `/hz delspawn <zone> [index]` | Removes spawn points from a zone |
+| `/hz delspawn <zone> [index]` | Removes spawn points from a zone (or specific index) |
 | `/hz listspawns [zone]` | Lists all registered spawn points |
 | `/hz clearspawns` | Removes all spawn points |
 | `/hz markzone <zone>` | Marks a zone as occupied (zombies will spawn there) |
 | `/hz unmarkzone <zone>` | Unmarks a zone |
 | `/hz listzones` | Lists all zones with spawns |
+
+### Debug Commands
+| Command | What It Does |
+|---------|-------------|
+| `/hz debug` | Toggles debug mode (spawn node visualization logs) |
+| `/hz config` | Lists all config values |
+| `/hz config <key> <value>` | Live-tweaks a config value without restart |
+| `/hz state` | Full game state dump |
 
 Requires the `hytalezombie.admin` permission.
 
@@ -216,6 +242,7 @@ src/
 │   │   │   └── PlayerConnectionListener.java
 │   │   ├── manager/
 │   │   │   ├── BarrierManager.java       # Window barrier CRUD
+│   │   │   ├── DebugManager.java         # Debug mode + in-world visualization
 │   │   │   ├── GameManagerProvider.java  # Manager access interface
 │   │   │   ├── GameSession.java          # MAIN ORCHESTRATOR (tick, spawn, damage, economy)
 │   │   │   ├── PlayerDataManager.java    # Per-player state

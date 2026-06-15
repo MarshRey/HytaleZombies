@@ -1,11 +1,17 @@
 package dev.hytalezombie.manager;
 
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.RemoveReason;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.config.HytaleZombieConfig;
+import dev.hytalezombie.entity.EntitySpawnHelper;
 import dev.hytalezombie.model.*;
 import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.spawn.SpawnNode;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -50,6 +56,10 @@ public class GameSession {
     // Player weapons
     private final Map<String, List<Weapon>> playerWeapons;
 
+    // Hytale SDK integration
+    private World world;
+    private final Map<Integer, String> networkIdToZombieId;
+
     /**
      * Logical representation of a zombie in the game.
      * Would be linked to a Hytale entity in actual gameplay.
@@ -64,6 +74,8 @@ public class GameSession {
         private boolean isAlive;
         private boolean isAttackingBarrier;
         private String targetBarrierZone;
+        private int networkId;
+        private Ref<EntityStore> entityRef;
 
         public ZombieInstance(String id, float health, float speed, Vector3f spawnPosition) {
             this(id, null, health, speed, spawnPosition);
@@ -79,6 +91,8 @@ public class GameSession {
             this.isAlive = true;
             this.isAttackingBarrier = false;
             this.targetBarrierZone = null;
+            this.networkId = -1;
+            this.entityRef = null;
         }
 
         public String getId() { return id; }
@@ -90,6 +104,10 @@ public class GameSession {
         public boolean isAlive() { return isAlive; }
         public boolean isAttackingBarrier() { return isAttackingBarrier; }
         public Optional<String> getTargetBarrierZone() { return Optional.ofNullable(targetBarrierZone); }
+        public int getNetworkId() { return networkId; }
+        public void setNetworkId(int networkId) { this.networkId = networkId; }
+        public Optional<Ref<EntityStore>> getEntityRef() { return Optional.ofNullable(entityRef); }
+        public void setEntityRef(@Nullable Ref<EntityStore> entityRef) { this.entityRef = entityRef; }
 
         public void damage(float amount) {
             this.health -= amount;
@@ -133,6 +151,7 @@ public class GameSession {
         this.activePowerUps = new ConcurrentHashMap<>();
         this.playerPerks = new ConcurrentHashMap<>();
         this.playerWeapons = new ConcurrentHashMap<>();
+        this.networkIdToZombieId = new ConcurrentHashMap<>();
     }
 
     // ==================== MATCH LIFECYCLE ====================
@@ -258,13 +277,30 @@ public class GameSession {
 
     /**
      * Creates a new zombie instance with stats scaled to the current round.
+     * When a Hytale World reference is available, also spawns a real entity via {@link EntitySpawnHelper}.
      */
     private ZombieInstance createZombie(Vector3f position) {
         float health = roundManager.getScaledZombieHealth();
         float speed = roundManager.getScaledZombieSpeed();
         String zombieId = "zombie_" + tickCounter + "_" + UUID.randomUUID().toString().substring(0, 8);
 
-        return new ZombieInstance(zombieId, health, speed, position);
+        ZombieInstance zombie = new ZombieInstance(zombieId, health, speed, position);
+
+        // Attempt to spawn a real Hytale entity if we have a world reference
+        if (world != null) {
+            EntitySpawnHelper.SpawnResult result = EntitySpawnHelper.spawnZombie(world, position);
+            if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
+                zombie.setNetworkId(result.networkId());
+                zombie.setEntityRef(result.entityRef());
+                networkIdToZombieId.put(result.networkId(), zombieId);
+                LOGGER.log(Level.FINE, "Spawned real Hytale zombie entity (networkId={0}) for {1}",
+                        new Object[]{result.networkId(), zombieId});
+            } else {
+                LOGGER.log(Level.WARNING, "Failed to spawn Hytale entity for zombie {0} — created logical-only", zombieId);
+            }
+        }
+
+        return zombie;
     }
 
     /**
@@ -310,6 +346,18 @@ public class GameSession {
             roundManager.decrementActiveZombies();
             zombiesKilledThisRound++;
 
+            // Remove the Hytale entity from the world if it was spawned
+            if (world != null) {
+                zombie.getEntityRef().ifPresent(ref -> {
+                    if (ref.isValid()) {
+                        world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE);
+                    }
+                });
+                if (zombie.getNetworkId() >= 0) {
+                    networkIdToZombieId.remove(zombie.getNetworkId());
+                }
+            }
+
             // Award points
             PlayerData playerData = playerDataManager.getPlayerData(playerId);
             if (playerData != null) {
@@ -346,6 +394,20 @@ public class GameSession {
             if (zombie.isAlive()) {
                 zombie.damage(zombie.getHealth()); // Kill it
                 zombiesKilledThisRound++;
+            }
+        }
+
+        // Remove all Hytale entities from the world
+        if (world != null) {
+            for (ZombieInstance zombie : activeZombies.values()) {
+                zombie.getEntityRef().ifPresent(ref -> {
+                    if (ref.isValid()) {
+                        world.getEntityStore().getStore().removeEntity(ref, RemoveReason.REMOVE);
+                    }
+                });
+                if (zombie.getNetworkId() >= 0) {
+                    networkIdToZombieId.remove(zombie.getNetworkId());
+                }
             }
         }
 
@@ -598,5 +660,63 @@ public class GameSession {
      */
     public Map<PowerUp.PowerUpType, PowerUp> getActivePowerUps() {
         return Collections.unmodifiableMap(activePowerUps);
+    }
+
+    // ==================== HYTALE SDK INTEGRATION ====================
+
+    /**
+     * Sets the Hytale World reference for entity spawning.
+     * Set this when the first player joins (from {@code PlayerReadyEvent}).
+     */
+    public void setWorld(@Nullable World world) {
+        this.world = world;
+    }
+
+    /**
+     * Gets the current Hytale World reference, or null if not yet set.
+     */
+    @Nullable
+    public World getWorld() {
+        return world;
+    }
+
+    /**
+     * Looks up a zombie's logical ID by its Hytale network ID.
+     * Used by {@code ZombieDamageEventSystem} to route damage events.
+     */
+    @Nonnull
+    public Optional<String> getZombieIdByNetworkId(int networkId) {
+        return Optional.ofNullable(networkIdToZombieId.get(networkId));
+    }
+
+    /**
+     * Manually spawns a zombie instance into the game, bypassing the round's
+     * spawn schedule. Used for testing (/hz spawnzombie) or special events.
+     * @param zoneId the zone to spawn from, or null for a random active zone
+     * @return the spawned zombie, or empty if no spawn nodes available
+     */
+    @Nonnull
+    public Optional<ZombieInstance> spawnZombieInstance(@Nullable String zoneId) {
+        Optional<SpawnNode> nodeOpt;
+        if (zoneId != null) {
+            List<SpawnNode> nodes = spawnManager.getNodesInZone(zoneId);
+            if (nodes.isEmpty()) return Optional.empty();
+            nodeOpt = Optional.of(nodes.get(new Random().nextInt(nodes.size())));
+        } else {
+            nodeOpt = spawnManager.getRandomSpawnNode();
+        }
+
+        if (nodeOpt.isEmpty()) return Optional.empty();
+
+        SpawnNode node = nodeOpt.get();
+        Vector3f position = spawnManager.getRandomizedPosition(node);
+        ZombieInstance zombie = createZombie(position);
+        activeZombies.put(zombie.getId(), zombie);
+        roundManager.incrementActiveZombies();
+        zombiesSpawnedThisRound++;
+
+        LOGGER.log(Level.FINE, "Manually spawned zombie {0} at {1} from zone {2}",
+                new Object[]{zombie.getId(), position, node.getZoneId()});
+        return Optional.of(zombie);
     }
 }

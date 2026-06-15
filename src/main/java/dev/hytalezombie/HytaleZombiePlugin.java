@@ -8,10 +8,14 @@ import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.task.TaskRegistration;
 import dev.hytalezombie.commands.HytaleZombieCommand;
 import dev.hytalezombie.config.HytaleZombieConfig;
+import dev.hytalezombie.entity.ZombieDamageEventSystem;
+import dev.hytalezombie.entity.ZombieEntity;
 import dev.hytalezombie.manager.*;
 import dev.hytalezombie.model.Vector3f;
 import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.spawn.SpawnNode;
+
+import javax.annotation.Nonnull;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -32,6 +36,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
     private PlayerDataManager playerDataManager;
     private BarrierManager barrierManager;
     private SpawnManager spawnManager;
+    private DebugManager debugManager;
 
     // Game session orchestrator
     private GameSession gameSession;
@@ -61,6 +66,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
         this.playerDataManager = new PlayerDataManager();
         this.barrierManager = new BarrierManager();
         this.spawnManager = new SpawnManager();
+        this.debugManager = new DebugManager();
 
         // Initialize the game session orchestrator
         this.gameSession = new GameSession(
@@ -73,6 +79,35 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
         getLogger().at(Level.INFO).log("HytaleZombie initialization complete.");
         return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Called during plugin setup, before {@link #start()}.
+     * Register entity types, components, and systems here.
+     * The plugin state is {@code SETUP} at this point — commands/events
+     * should still be registered in {@link #start()} (state is {@code ENABLED}).
+     */
+    @Override
+    protected void setup() {
+        getLogger().at(Level.INFO).log("HytaleZombie is setting up...");
+
+        // Register the ZombieEntity with Hytale's EntityModule.
+        // This enables:
+        //   - ZombieEntity.getComponentType() to return a valid ComponentType
+        //   - ECS systems to query and interact with zombie entities
+        //   - Entity persistence and networking via the built-in codec
+        getEntityRegistry().registerEntity(
+            "hz_zombie",
+            ZombieEntity.class,
+            ZombieEntity::new,
+            ZombieEntity.CODEC
+        );
+
+        // Register the damage event system so zombie hits/kills are forwarded
+        // to GameSession for point tracking and round management.
+        getEntityStoreRegistry().registerSystem(new ZombieDamageEventSystem(gameSession));
+
+        getLogger().at(Level.INFO).log("HytaleZombie setup complete (ZombieEntity registered as 'hz_zombie', damage system active).");
     }
 
     /**
@@ -100,6 +135,17 @@ public class HytaleZombiePlugin extends JavaPlugin {
                     .getUuid()
                     .toString();
                 getLogger().at(Level.INFO).log("Player ready: {0}", playerId);
+
+                // Set the World reference on first player join (needed for entity spawning)
+                if (gameSession.getWorld() == null) {
+                    com.hypixel.hytale.server.core.universe.world.World world =
+                        event.getPlayerRef().getStore().getExternalData().getWorld();
+                    if (world != null) {
+                        gameSession.setWorld(world);
+                        getLogger().at(Level.INFO).log("World reference set for entity spawning: {0}", world.getName());
+                    }
+                }
+
                 playerDataManager.getOrCreatePlayerData(playerId);
                 // Send welcome message using PlayerRef from the store
                 com.hypixel.hytale.server.core.universe.PlayerRef playerRef = 
@@ -244,12 +290,20 @@ public class HytaleZombiePlugin extends JavaPlugin {
         return spawnManager;
     }
 
+    public DebugManager getDebugManager() {
+        return debugManager;
+    }
+
     public GameSession getGameSession() {
         return gameSession;
     }
 
     public void setSpawnManager(SpawnManager spawnManager) {
         this.spawnManager = spawnManager;
+    }
+
+    public void setDebugManager(DebugManager debugManager) {
+        this.debugManager = debugManager;
     }
 
     public void setRoundManager(RoundManager roundManager) {

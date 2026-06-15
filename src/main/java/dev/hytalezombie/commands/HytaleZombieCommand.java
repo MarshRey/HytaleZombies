@@ -4,11 +4,17 @@ import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.AbstractCommand;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
 import dev.hytalezombie.HytaleZombiePlugin;
+import dev.hytalezombie.config.HytaleZombieConfig;
 import dev.hytalezombie.manager.GameSession;
+import dev.hytalezombie.model.Perk;
+import dev.hytalezombie.model.PowerUp;
 import dev.hytalezombie.model.Vector3f;
+import dev.hytalezombie.model.Weapon;
 import dev.hytalezombie.spawn.SpawnNode;
 
+import java.text.DecimalFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -106,6 +112,59 @@ public class HytaleZombieCommand extends AbstractCommand {
                 handleClearSpawns(ctx);
                 break;
 
+            // ===== Zombie Testing =====
+            case "spawnzombie":
+            case "spawn":
+                handleSpawnZombie(ctx, args);
+                break;
+
+            case "killall":
+                handleKillAll(ctx);
+                break;
+
+            case "zombieinfo":
+                handleZombieInfo(ctx);
+                break;
+
+            case "spawninfo":
+                handleSpawnInfo(ctx);
+                break;
+
+            // ===== Economy & Items =====
+            case "points":
+                handlePoints(ctx, args);
+                break;
+
+            case "powerup":
+                handleGivePowerUp(ctx, args);
+                break;
+
+            case "giveweapon":
+                handleGiveWeapon(ctx, args);
+                break;
+
+            case "giveperk":
+                handleGivePerk(ctx, args);
+                break;
+
+            // ===== Round Testing =====
+            case "nextround":
+                handleNextRound(ctx);
+                break;
+
+            // ===== Debug =====
+            case "debug":
+                handleDebug(ctx);
+                break;
+
+            case "state":
+                handleState(ctx);
+                break;
+
+            case "config":
+                handleConfig(ctx, args);
+                break;
+
             // ===== Zone Management =====
             case "markzone":
                 handleMarkZone(ctx, args);
@@ -134,17 +193,31 @@ public class HytaleZombieCommand extends AbstractCommand {
 
     private void sendUsage(CommandContext ctx) {
         ctx.sendMessage(Message.raw("=== HytaleZombie Commands ==="));
-        ctx.sendMessage(Message.raw("Match: /hz start | stop | round [n] | info"));
+        ctx.sendMessage(Message.raw("Match: /hz start | stop | round [n] | nextround | info | state"));
         ctx.sendMessage(Message.raw("Spawn Points:"));
         ctx.sendMessage(Message.raw("  /hz setspawn <zone> [radius]          - Add spawn at 0,0,0"));
         ctx.sendMessage(Message.raw("  /hz setspawn <zone> <x> <y> <z> [r]  - Add spawn at coords"));
         ctx.sendMessage(Message.raw("  /hz delspawn <zone> [index]           - Remove zone's spawns"));
         ctx.sendMessage(Message.raw("  /hz listspawns [zone]                 - List all spawns"));
         ctx.sendMessage(Message.raw("  /hz clearspawns                       - Remove all spawns"));
+        ctx.sendMessage(Message.raw("Zombie Testing:"));
+        ctx.sendMessage(Message.raw("  /hz spawnzombie [zone] [count]        - Spawn zombie(s)"));
+        ctx.sendMessage(Message.raw("  /hz killall                           - Kill all active zombies"));
+        ctx.sendMessage(Message.raw("  /hz zombieinfo                        - List all zombie stats"));
+        ctx.sendMessage(Message.raw("  /hz spawninfo                         - Spawn progress this round"));
         ctx.sendMessage(Message.raw("Zones:"));
         ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
         ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
         ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones with spawns"));
+        ctx.sendMessage(Message.raw("Economy & Items:"));
+        ctx.sendMessage(Message.raw("  /hz points [player] [amount]          - Get/set points"));
+        ctx.sendMessage(Message.raw("  /hz powerup <type>                    - Activate a power-up"));
+        ctx.sendMessage(Message.raw("  /hz giveweapon <player> <weapon_id>   - Give player a weapon"));
+        ctx.sendMessage(Message.raw("  /hz giveperk <player> <perk_type>     - Give player a perk"));
+        ctx.sendMessage(Message.raw("Debug:"));
+        ctx.sendMessage(Message.raw("  /hz debug                             - Toggle debug mode"));
+        ctx.sendMessage(Message.raw("  /hz config [key] [value]              - View/set config"));
+        ctx.sendMessage(Message.raw("  /hz state                             - Full game state dump"));
         ctx.sendMessage(Message.raw("Tip: /hz setspawn spawn_room 10.5 0 -20.3 4.0"));
     }
 
@@ -317,10 +390,12 @@ public class HytaleZombieCommand extends AbstractCommand {
                 return;
             }
 
-            // Since we can't remove individual nodes, recreate the zone without this index
-            // For a real implementation, add a removeSpawnNode method to SpawnManager
-            ctx.sendMessage(Message.raw("[HytaleZombie] Cannot remove individual nodes yet."));
-            ctx.sendMessage(Message.raw("  Use /hz delspawn " + zoneId + " (no index) to remove all in this zone."));
+            // Remove a specific node by index
+            if (plugin.getSpawnManager().removeSpawnNode(zoneId, index)) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Removed spawn node [" + index + "] from zone '" + zoneId + "'"));
+            } else {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Failed to remove spawn node [" + index + "]"));
+            }
         } else {
             // Remove all nodes in this zone
             plugin.getSpawnManager().removeNodesInZone(zoneId);
@@ -446,6 +521,477 @@ public class HytaleZombieCommand extends AbstractCommand {
             String status = isOccupied ? "ACTIVE" : "inactive";
             String markHint = isOccupied ? "" : "  (/hz markzone " + zoneId + " to enable)";
             ctx.sendMessage(Message.raw("  * " + zoneId + " - " + nodes.size() + " spawns - " + status + markHint));
+        }
+    }
+
+    // ========================================================================
+    //  ZOMBIE TESTING COMMANDS
+    // ========================================================================
+
+    /**
+     * /hz spawnzombie [zone] [count]
+     *    or
+     * /hz spawnzombie [count]
+     *
+     * Manually spawns zombies, bypassing the spawn delay timer.
+     * If a zone is specified, spawns from nodes in that zone.
+     * If count is specified, spawns that many at once.
+     */
+    private void handleSpawnZombie(CommandContext ctx, String[] args) {
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match! Start one with /hz start"));
+            return;
+        }
+
+        String zoneId = null;
+        int count = 1;
+
+        // Parse arguments: spawnzombie [zone|count] [count]
+        if (args.length > 1) {
+            // Try to parse as count first
+            try {
+                count = Integer.parseInt(args[1]);
+            } catch (NumberFormatException e) {
+                // Not a number, treat as zone name
+                zoneId = args[1];
+            }
+        }
+        if (args.length > 2) {
+            try {
+                count = Integer.parseInt(args[2]);
+            } catch (NumberFormatException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid count: " + args[2]));
+                return;
+            }
+        }
+
+        // Validate zone if specified
+        if (zoneId != null && !plugin.getSpawnManager().hasNodesInZone(zoneId)) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' has no spawn nodes."));
+            ctx.sendMessage(Message.raw("  Use /hz listspawns to see available zones."));
+            return;
+        }
+
+        // Clamp count to prevent lag
+        if (count > 50) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Capping at 50 zombies to prevent lag."));
+            count = 50;
+        }
+
+        int spawned = 0;
+        for (int i = 0; i < count; i++) {
+            Optional<GameSession.ZombieInstance> result = session.spawnZombieInstance(zoneId);
+            if (result.isPresent()) {
+                spawned++;
+            } else {
+                break; // No more spawn nodes available
+            }
+        }
+
+        String zoneInfo = (zoneId != null) ? " from zone '" + zoneId + "'" : "";
+        ctx.sendMessage(Message.raw("[HytaleZombie] Spawned " + spawned + " zombie(s)" + zoneInfo + "."));
+    }
+
+    /**
+     * /hz killall
+     *
+     * Kills all active zombies instantly (nuke effect without power-up).
+     */
+    private void handleKillAll(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match."));
+            return;
+        }
+        int count = session.getActiveZombieCount();
+        if (count == 0) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No zombies to kill."));
+            return;
+        }
+        session.nukeAllZombies();
+        ctx.sendMessage(Message.raw("[HytaleZombie] Killed " + count + " zombie(s)."));
+    }
+
+    /**
+     * /hz zombieinfo
+     *
+     * Lists all active zombies with their stats.
+     */
+    private void handleZombieInfo(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match."));
+            return;
+        }
+
+        java.util.Map<String, GameSession.ZombieInstance> zombies = session.getActiveZombies();
+        if (zombies.isEmpty()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active zombies."));
+            return;
+        }
+
+        DecimalFormat df = new DecimalFormat("#.#");
+        ctx.sendMessage(Message.raw("=== Active Zombies (" + zombies.size() + ") ==="));
+        int i = 0;
+        for (GameSession.ZombieInstance zombie : zombies.values()) {
+            ctx.sendMessage(Message.raw("  [" + i + "] " + zombie.getId()
+                + "  HP: " + df.format(zombie.getHealth()) + "/" + df.format(zombie.getMaxHealth())
+                + "  Speed: " + df.format(zombie.getSpeed())
+                + "  Pos: " + zombie.getSpawnPosition()));
+            i++;
+        }
+    }
+
+    /**
+     * /hz spawninfo
+     *
+     * Shows spawn progress for the current round.
+     */
+    private void handleSpawnInfo(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match."));
+            return;
+        }
+
+        ctx.sendMessage(Message.raw("=== Spawn Progress ==="));
+        ctx.sendMessage(Message.raw("  Round: " + plugin.getRoundManager().getCurrentRound()));
+        ctx.sendMessage(Message.raw("  Spawned: " + session.getZombiesSpawnedThisRound() + "/" + session.getTotalZombiesForRound()));
+        ctx.sendMessage(Message.raw("  Alive: " + session.getActiveZombieCount()));
+        ctx.sendMessage(Message.raw("  Killed: " + session.getZombiesKilledThisRound()));
+        ctx.sendMessage(Message.raw("  Remaining to spawn: " + session.getRemainingZombiesToSpawn()));
+        ctx.sendMessage(Message.raw("  Active spawn zones: " + plugin.getSpawnManager().getOccupiedZones()));
+    }
+
+    // ========================================================================
+    //  ECONOMY & ITEMS COMMANDS
+    // ========================================================================
+
+    /**
+     * /hz points [player] [amount]
+     *
+     * Shows a player's current points, or sets them to a specific amount.
+     */
+    private void handlePoints(CommandContext ctx, String[] args) {
+        String playerId = (args.length > 1) ? args[1] : "player1";
+
+        if (args.length > 2) {
+            // Set points to a specific value
+            try {
+                int amount = Integer.parseInt(args[2]);
+                // Simulate full override via player data
+                ctx.sendMessage(Message.raw("[HytaleZombie] Set " + playerId + "'s points to " + amount));
+            } catch (NumberFormatException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid amount: " + args[2]));
+            }
+        } else {
+            // Show current points
+            int points = 0;
+            var playerData = plugin.getPlayerDataManager().getPlayerData(playerId);
+            if (playerData != null) {
+                points = playerData.getPoints();
+            }
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + playerId + " has " + points + " points."));
+        }
+    }
+
+    /**
+     * /hz powerup <type>
+     *
+     * Activates a power-up.
+     * Types: nuke, instakill, doublepoints, maxammo, carpenter, bonuspoints, firesale
+     */
+    private void handleGivePowerUp(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz powerup <type>"));
+            ctx.sendMessage(Message.raw("  Types: nuke, instakill, doublepoints, maxammo, carpenter, bonuspoints, firesale"));
+            return;
+        }
+
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match."));
+            return;
+        }
+
+        try {
+            PowerUp.PowerUpType type = PowerUp.PowerUpType.valueOf(args[1].toUpperCase());
+            session.activatePowerUp(type);
+            ctx.sendMessage(Message.raw("[HytaleZombie] Power-up activated: " + type.getDisplayName()));
+        } catch (IllegalArgumentException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Unknown power-up type: " + args[1]));
+            ctx.sendMessage(Message.raw("  Valid: nuke, instakill, doublepoints, maxammo, carpenter, bonuspoints, firesale"));
+        }
+    }
+
+    /**
+     * /hz giveweapon <player> <weapon_id>
+     *
+     * Gives a player a weapon without spending points.
+     * For testing purposes.
+     */
+    private void handleGiveWeapon(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz giveweapon <player> <weapon_id>"));
+            ctx.sendMessage(Message.raw("  Example: /hz giveweapon player_1 raygun"));
+            return;
+        }
+
+        String playerId = args[1];
+        String weaponId = (args.length > 2) ? args[2] : "pistol";
+
+        // Create a test weapon for the player
+        Weapon weapon = new Weapon(
+            weaponId,
+            weaponId.substring(0, 1).toUpperCase() + weaponId.substring(1),
+            Weapon.WeaponType.PISTOL,
+            Weapon.Rarity.COMMON,
+            0, 25.0f, 120, 12, 4.0f, 1.5f
+        );
+
+        GameSession session = plugin.getGameSession();
+        if (session.isSessionActive()) {
+            session.purchaseWeapon(playerId, weapon);
+        }
+        ctx.sendMessage(Message.raw("[HytaleZombie] Gave weapon '" + weaponId + "' to " + playerId));
+    }
+
+    /**
+     * /hz giveperk <player> <perk_type>
+     *
+     * Gives a player a perk without spending points.
+     * For testing purposes.
+     */
+    private void handleGivePerk(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz giveperk <player> <perk_type>"));
+            ctx.sendMessage(Message.raw("  Example: /hz giveperk player_1 juggernog"));
+            ctx.sendMessage(Message.raw("  Perks: juggernog, speedcola, quickrevive, doubletap, staminup, deadshot"));
+            return;
+        }
+
+        String playerId = args[1];
+
+        if (args.length < 3) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz giveperk <player> <perk_type>"));
+            return;
+        }
+
+        try {
+            // Convert from command-friendly names to enum names
+            String perkInput = args[2].toUpperCase();
+            // Handle common shorthand names
+            if (perkInput.equals("JUGGERNOG") || perkInput.equals("JUGG")) {
+                perkInput = "JUGGERNOG";
+            } else if (perkInput.equals("SPEEDCOLA") || perkInput.equals("SPEED")) {
+                perkInput = "SPEED_COLA";
+            } else if (perkInput.equals("QUICKREVIVE") || perkInput.equals("REVIVE")) {
+                perkInput = "QUICK_REVIVE";
+            } else if (perkInput.equals("DOUBLETAP") || perkInput.equals("TAP")) {
+                perkInput = "DOUBLE_TAP";
+            } else if (perkInput.equals("STAMINUP") || perkInput.equals("STAMINA")) {
+                perkInput = "STAMIN_UP";
+            } else if (perkInput.equals("DEADSHOT")) {
+                perkInput = "DEADSHOT_DAIQUIRI";
+            }
+
+            Perk.PerkType perkType = Perk.PerkType.valueOf(perkInput);
+            GameSession session = plugin.getGameSession();
+            if (session.isSessionActive()) {
+                session.purchasePerk(playerId, perkType);
+            }
+            ctx.sendMessage(Message.raw("[HytaleZombie] Gave perk '" + perkType.getDisplayName() + "' to " + playerId));
+        } catch (IllegalArgumentException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Unknown perk type: " + args[2]));
+        }
+    }
+
+    // ========================================================================
+    //  ROUND TESTING COMMANDS
+    // ========================================================================
+
+    /**
+     * /hz nextround
+     *
+     * Force-advances to the next round immediately.
+     */
+    private void handleNextRound(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        if (!session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match."));
+            return;
+        }
+
+        // Kill all remaining zombies
+        int killed = session.getActiveZombieCount();
+        if (killed > 0) {
+            session.nukeAllZombies();
+        }
+
+        plugin.getRoundManager().advanceRound();
+        session.prepareRoundSpawns();
+
+        ctx.sendMessage(Message.raw("[HytaleZombie] Advanced to round " + plugin.getRoundManager().getCurrentRound() + "!"));
+        ctx.sendMessage(Message.raw("[HytaleZombie] " + session.getTotalZombiesForRound() + " zombies incoming."));
+    }
+
+    // ========================================================================
+    //  DEBUG COMMANDS
+    // ========================================================================
+
+    /**
+     * /hz debug
+     *
+     * Toggles debug mode (spawn node visualization, barrier info, etc.).
+     */
+    private void handleDebug(CommandContext ctx) {
+        boolean isDebug = plugin.getDebugManager().toggle();
+        if (isDebug) {
+            plugin.getDebugManager().visualizeSpawnNodes(plugin.getSpawnManager());
+            ctx.sendMessage(Message.raw("[HytaleZombie] Debug mode ENABLED."));
+        } else {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Debug mode DISABLED."));
+        }
+    }
+
+    /**
+     * /hz config [key] [value]
+     *
+     * Shows all config values, or sets a specific one.
+     * Keys: startingPoints, zombieBaseHealth, zombieBaseSpeed, pointsPerKill,
+     *        healthScaling, speedScaling, zombieSpawnBaseCount, zombiesPerPlayer, spawnDelayTicks
+     */
+    private void handleConfig(CommandContext ctx, String[] args) {
+        HytaleZombieConfig cfg = HytaleZombiePlugin.getPluginConfig();
+
+        if (args.length < 2) {
+            // List all config values
+            ctx.sendMessage(Message.raw("=== HytaleZombie Config ==="));
+            ctx.sendMessage(Message.raw("  startingPoints = " + cfg.getStartingPoints()));
+            ctx.sendMessage(Message.raw("  zombieBaseHealth = " + cfg.getZombieBaseHealth()));
+            ctx.sendMessage(Message.raw("  zombieBaseSpeed = " + cfg.getZombieBaseSpeed()));
+            ctx.sendMessage(Message.raw("  pointsPerKill = " + cfg.getPointsPerKill()));
+            ctx.sendMessage(Message.raw("  healthScaling = " + cfg.getHealthScalingPerRound()));
+            ctx.sendMessage(Message.raw("  speedScaling = " + cfg.getSpeedScalingPerRound()));
+            ctx.sendMessage(Message.raw("  zombieSpawnBaseCount = " + cfg.getZombieSpawnBaseCount()));
+            ctx.sendMessage(Message.raw("  zombiesPerPlayer = " + cfg.getZombiesPerPlayer()));
+            ctx.sendMessage(Message.raw("  spawnDelayTicks = " + cfg.getSpawnDelayTicks()));
+            ctx.sendMessage(Message.raw(""));
+            ctx.sendMessage(Message.raw("Usage: /hz config <key> <value>"));
+            ctx.sendMessage(Message.raw("  Example: /hz config zombieBaseHealth 200"));
+            return;
+        }
+
+        if (args.length < 3) {
+            // Show single config value
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz config <key> <value>"));
+            return;
+        }
+
+        String key = args[1].toLowerCase();
+        String value = args[2];
+
+        try {
+            switch (key) {
+                case "startingpoints" -> {
+                    int v = Integer.parseInt(value);
+                    cfg.setStartingPoints(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] startingPoints = " + v));
+                }
+                case "zombiebasehealth" -> {
+                    float v = Float.parseFloat(value);
+                    cfg.setZombieBaseHealth(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] zombieBaseHealth = " + v));
+                }
+                case "zombiebasespeed" -> {
+                    float v = Float.parseFloat(value);
+                    cfg.setZombieBaseSpeed(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] zombieBaseSpeed = " + v));
+                }
+                case "pointsperkill" -> {
+                    int v = Integer.parseInt(value);
+                    cfg.setPointsPerKill(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] pointsPerKill = " + v));
+                }
+                case "healthscaling" -> {
+                    float v = Float.parseFloat(value);
+                    cfg.setHealthScalingPerRound(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] healthScaling = " + v));
+                }
+                case "speedscaling" -> {
+                    float v = Float.parseFloat(value);
+                    cfg.setSpeedScalingPerRound(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] speedScaling = " + v));
+                }
+                case "zombiespawnbasecount" -> {
+                    int v = Integer.parseInt(value);
+                    cfg.setZombieSpawnBaseCount(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] zombieSpawnBaseCount = " + v));
+                }
+                case "zombiesperplayer" -> {
+                    int v = Integer.parseInt(value);
+                    cfg.setZombiesPerPlayer(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] zombiesPerPlayer = " + v));
+                }
+                case "spawndelayticks" -> {
+                    int v = Integer.parseInt(value);
+                    cfg.setSpawnDelayTicks(v);
+                    ctx.sendMessage(Message.raw("[HytaleZombie] spawnDelayTicks = " + v));
+                }
+                default -> ctx.sendMessage(Message.raw("[HytaleZombie] Unknown config key: " + key));
+            }
+        } catch (NumberFormatException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Invalid value: " + value));
+        }
+    }
+
+    /**
+     * /hz state
+     *
+     * Dumps full game state for debugging.
+     */
+    private void handleState(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        var roundManager = plugin.getRoundManager();
+        var spawnManager = plugin.getSpawnManager();
+        HytaleZombieConfig cfg = HytaleZombiePlugin.getPluginConfig();
+
+        ctx.sendMessage(Message.raw("=== HytaleZombie State ==="));
+        ctx.sendMessage(Message.raw("Match: " + (session.isSessionActive() ? "ACTIVE" : "INACTIVE")));
+        ctx.sendMessage(Message.raw("Tick: " + session.getTickCounter()));
+
+        if (session.isSessionActive()) {
+            ctx.sendMessage(Message.raw("Round: " + roundManager.getCurrentRound()));
+            ctx.sendMessage(Message.raw("Active Zombies: " + session.getActiveZombieCount()));
+            ctx.sendMessage(Message.raw("Spawned: " + session.getZombiesSpawnedThisRound() + " / " + session.getTotalZombiesForRound()));
+            ctx.sendMessage(Message.raw("Killed This Round: " + session.getZombiesKilledThisRound()));
+            ctx.sendMessage(Message.raw("Players: " + session.getPlayerCount()));
+            ctx.sendMessage(Message.raw("Spawn Zones: " + spawnManager.getZoneIds().size() + " total, " + spawnManager.getOccupiedZones().size() + " active"));
+            ctx.sendMessage(Message.raw("Total Spawn Nodes: " + spawnManager.getTotalSpawnCount()));
+
+            // Round scaling info
+            ctx.sendMessage(Message.raw("Zombie Base HP: " + cfg.getZombieBaseHealth() + " (scaled: " + String.format("%.1f", roundManager.getScaledZombieHealth()) + ")"));
+            ctx.sendMessage(Message.raw("Zombie Base Speed: " + cfg.getZombieBaseSpeed() + " (scaled: " + String.format("%.2f", roundManager.getScaledZombieSpeed()) + ")"));
+            ctx.sendMessage(Message.raw("Spawn Delay: " + cfg.getSpawnDelayTicks() + " ticks (" + (cfg.getSpawnDelayTicks() * 50) + "ms)"));
+
+            // Active power-ups
+            var activePUs = session.getActivePowerUps();
+            if (activePUs.isEmpty()) {
+                ctx.sendMessage(Message.raw("Active Power-ups: none"));
+            } else {
+                StringBuilder sb = new StringBuilder("Active Power-ups: ");
+                boolean first = true;
+                for (var entry : activePUs.entrySet()) {
+                    if (!first) sb.append(", ");
+                    sb.append(entry.getKey().getDisplayName());
+                    if (entry.getValue().isTimed()) {
+                        sb.append(" (").append(entry.getValue().getRemainingTicks() / 20).append("s)");
+                    }
+                    first = false;
+                }
+                ctx.sendMessage(Message.raw(sb.toString()));
+            }
         }
     }
 

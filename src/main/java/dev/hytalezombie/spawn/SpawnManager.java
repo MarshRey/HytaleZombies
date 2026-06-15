@@ -114,6 +114,36 @@ public class SpawnManager {
     }
 
     /**
+     * Removes a single spawn node from a zone by its index.
+     * @param zoneId the zone containing the node
+     * @param index the index of the node to remove
+     * @return true if the node was removed
+     */
+    public boolean removeSpawnNode(@Nonnull String zoneId, int index) {
+        List<SpawnNode> nodes = zoneSpawnNodes.get(zoneId);
+        if (nodes != null && index >= 0 && index < nodes.size()) {
+            SpawnNode removed = nodes.remove(index);
+            if (nodes.isEmpty()) {
+                zoneSpawnNodes.remove(zoneId);
+                occupiedZones.remove(zoneId);
+            }
+            LOGGER.log(Level.INFO, "Removed spawn node at index {0} from zone {1}: {2}",
+                    new Object[]{index, zoneId, removed});
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the total number of registered spawn nodes across all zones.
+     */
+    public int getTotalSpawnCount() {
+        return zoneSpawnNodes.values().stream()
+                .mapToInt(List::size)
+                .sum();
+    }
+
+    /**
      * Returns all zone IDs that have registered spawn nodes.
      */
     @Nonnull

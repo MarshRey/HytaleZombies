@@ -1,3 +1,23 @@
+# Agent Instructions
+
+> **Always read this file first when starting work on this project.**
+
+## Core Rules for Every Session
+
+1. **Update `README.md`**: After any code change, feature addition, build fix, or documentation improvement, update `README.md` to reflect the current state of the project. This includes:
+   - Test counts (run `./gradlew test` and update the count in the README)
+   - New files or directories added to the project file map
+   - New commands or configuration options
+   - Build instructions or troubleshooting steps that changed
+   - Entity spawning or ECS API changes
+
+2. **Push to Git**: After making changes and updating the README, commit and push to the remote repository. The commit should be meaningful and describe what was done.
+
+3. **Keep `AGENTS.md` Current**: If this file becomes outdated, update it. This is the primary handoff document for future agents.
+
+---
+
+
 # HytaleZombie - Project Context
 
 ## Overview
@@ -292,17 +312,31 @@ All spawning logic can be tested through the existing unit tests. Run:
 | Weapon registry with wall + mystery box | ✅ | `WeaponRegistry.java` |
 | 138 unit tests (all passing) | ✅ | `src/test/` |
 
+## ✅ Hytale SDK Integration (Entity System — Complete)
+
+| Feature | Status | Key File(s) |
+|---------|--------|-------------|
+| ZombieEntity class (extends LivingEntity) | ✅ | `src/main/java/dev/hytalezombie/entity/ZombieEntity.java` |
+| EntitySpawnHelper (assembles ECS holder) | ✅ | `src/main/java/dev/hytalezombie/entity/EntitySpawnHelper.java` |
+| ZombieEntity registered with EntityModule | ✅ | `HytaleZombiePlugin.setup()` — registered as `"hz_zombie"` |
+| World reference accessible to GameSession | ✅ | `GameSession.setWorld()` — set from `PlayerReadyEvent` in `start()` |
+| createZombie() spawns real entities | ✅ | `GameSession.createZombie()` calls `EntitySpawnHelper.spawnZombie()` |
+| Damage event listener for zombie hits/kills | ✅ | `ZombieDamageEventSystem.java` — registered in `setup()` |
+| Entity removal on death | ✅ | `GameSession.damageZombie()` + `nukeAllZombies()` call `CommandBuffer.removeEntity()` |
+
 ---
 
-## ⚠️ Important: Plugin Lifecycle Gotcha
+## ⚠️ Important: Plugin Lifecycle
 
-Commands and events **cannot** be registered in `preLoad()`. The plugin state is `NONE` during `preLoad()`,
-and the Hytale `CommandRegistry`/`EventRegistry` will throw:
+The Hytale plugin lifecycle follows: `NONE` → `SETUP` (via `setup()`) → `START`/`ENABLED` (via `start()`).
 
-> **"The plugin ... is not enabled!"**
+| Phase | When | What you can do | What you CAN'T do |
+|-------|------|-----------------|-------------------|
+| `preLoad()` | Plugin loaded, state is `NONE` | Create managers, init fields | Register entities, commands, events, game loops |
+| `setup()` | Plugin transitioning to `SETUP` state | Register **entity types** via `getEntityRegistry().registerEntity()` | Register commands, events (plugin not yet ENABLED) |
+| `start()` | Plugin is `ENABLED` | Register commands, events, start game loops | — |
 
-Always register commands, events, and game loops in the **`start()`** method instead, which runs after
-the plugin state transitions through `SETUP` → `START` → `ENABLED`.
+Commands and events **cannot** be registered in `preLoad()` or `setup()`. Only in `start()`:
 
 ```java
 // ✅ CORRECT — move registrations here
@@ -314,47 +348,111 @@ protected void start() {
 }
 ```
 
-## 🔌 What Needs Hytale SDK Integration
+## 🔌 Hytale SDK Integration — Step-by-Step Plan
 
-### The Single Blocking Issue: Entity Spawning
+### Step 1 ✅ — Register ZombieEntity with EntityModule
+**File**: `HytaleZombiePlugin.java` — `setup()` method added.
+**Status**: ✅ COMPLETE
 
-`GameSession.createZombie()` currently creates a **logical** `ZombieInstance` stored in a `HashMap<String, ZombieInstance>`. To see zombies in the actual game, this method needs to call the Hytale SDK to **spawn a real monster entity** at the calculated position.
-
-**`GameSession.java`** — the `createZombie()` method (line ~233):
-
+The `setup()` method now calls:
 ```java
-private ZombieInstance createZombie(Vector3f position) {
-    float health = roundManager.getScaledZombieHealth();
-    float speed = roundManager.getScaledZombieSpeed();
-    String zombieId = "zombie_" + tickCounter + "_" + UUID.randomUUID().toString().substring(0, 8);
+getEntityRegistry().registerEntity(
+    "hz_zombie",
+    ZombieEntity.class,
+    ZombieEntity::new,
+    ZombieEntity.CODEC
+);
+```
+This registers `ZombieEntity` with Hytale's ECS framework so that:
+- `ZombieEntity.getComponentType()` returns a valid `ComponentType<EntityStore, ZombieEntity>`
+- The entity codec (for serialization/networking) is registered
+- ECS systems can query for `ZombieEntity` components
 
-    // TODO: Replace with Hytale entity spawning:
-    // Entity zombieEntity = entityFactory.createZombie(position);
-    // zombieEntity.setHealth(health);
-    // zombieEntity.setSpeed(speed);
-    // 
-    // And register a damage listener:
-    // eventRegistry.listen(zombieEntity, DamageEvent.class, event -> {
-    //     gameSession.damageZombie(
-    //         zombieEntity.getId(), event.getDamage(), event.getPlayerId()
-    //     );
-    // });
+### Step 2 ✅ — Provide World Reference for Entity Spawning
+**Files**: `GameSession.java`, `HytaleZombiePlugin.java`
+**Status**: ✅ COMPLETE
 
-    return new ZombieInstance(zombieId, health, speed, position);
+Added a `World` field to `GameSession` with `setWorld()`/`getWorld()` accessors. The world is obtained from the first `PlayerReadyEvent`:
+```java
+// In HytaleZombiePlugin.start() — PlayerReadyEvent handler:
+if (gameSession.getWorld() == null) {
+    World world = event.getPlayerRef().getStore().getExternalData().getWorld();
+    if (world != null) {
+        gameSession.setWorld(world);
+    }
 }
 ```
 
-Once actual entities are spawned, the rest works automatically — round advancement, damage tracking, points, everything.
+### Step 3 ✅ — Update createZombie() to Spawn Real Entities
+**File**: `GameSession.java`, `EntitySpawnHelper.java`
+**Status**: ✅ COMPLETE
 
-### Required Integration Touchpoints (All Already Wired)
+`EntitySpawnHelper.spawnZombie()` now returns a `SpawnResult` record containing both the `networkId` and the `Ref<EntityStore>` for later removal. `GameSession.createZombie()` calls it conditionally when a `World` reference is available, falling back to logical-only zombies for test compatibility:
+
+```java
+private ZombieInstance createZombie(Vector3f position) {
+    // ... create ZombieInstance with scaled health/speed ...
+    
+    if (world != null) {
+        EntitySpawnHelper.SpawnResult result = EntitySpawnHelper.spawnZombie(world, position);
+        if (result != EntitySpawnHelper.SpawnResult.FAILED && result.entityRef() != null) {
+            zombie.setNetworkId(result.networkId());
+            zombie.setEntityRef(result.entityRef());
+            networkIdToZombieId.put(result.networkId(), zombieId);
+        }
+    }
+    return zombie;
+}
+```
+
+### Step 4 ✅ — Hook Damage Events
+**Files**: `ZombieDamageEventSystem.java` (new), `HytaleZombiePlugin.java`
+**Status**: ✅ COMPLETE
+
+Created `ZombieDamageEventSystem` extending `DamageEventSystem`. It:
+- Queries for `ZombieEntity` components
+- Runs in the `DamageModule.inspectDamageGroup`
+- Resolves zombie network ID → logical ID via `GameSession.getZombieIdByNetworkId()`
+- Extracts the attacker's UUID from the damage source
+- Forwards hits to `GameSession.damageZombie()`
+
+Registered in `HytaleZombiePlugin.setup()`:
+```java
+getEntityStoreRegistry().registerSystem(new ZombieDamageEventSystem(gameSession));
+```
+
+### Step 5 ✅ — Handle Entity Removal on Death
+**Files**: `GameSession.java`
+**Status**: ✅ COMPLETE
+
+In `damageZombie()`, when a zombie dies:
+```java
+if (world != null) {
+    zombie.getEntityRef().ifPresent(ref -> {
+        CommandBuffer<EntityStore> cmdBuffer = world.getEntityStore().getStore().getCommandBuffer();
+        if (cmdBuffer != null && ref.isValid()) {
+            cmdBuffer.removeEntity(ref, RemoveReason.REMOVE);
+        }
+    });
+    if (zombie.getNetworkId() >= 0) {
+        networkIdToZombieId.remove(zombie.getNetworkId());
+    }
+}
+```
+
+Same pattern applied to `nukeAllZombies()` for bulk entity removal.
+
+### Integration Touchpoints (All Wired)
 
 | Integration Point | File | Status |
 |---|---|---|
-| Extend `JavaPlugin` | `HytaleZombiePlugin.java` | Already extends it |
-| Register commands via Hytale's API | `HytaleZombieCommand.java` | Already extends `AbstractCommand` |
-| Handle `PlayerReadyEvent` | `HytaleZombiePlugin.java` | Registered in `start()` (plugin must be ENABLED) |
-| Game loop via Hytale's task system | `HytaleZombiePlugin.java` | Already uses `TaskRegistration` |
-| Send messages to players with Hytale's `Message` API | `HytaleZombieCommand.java` | Already uses `Message.raw()` |
+| Extend `JavaPlugin` | `HytaleZombiePlugin.java` | ✅ Already extends it |
+| Register commands via Hytale's API | `HytaleZombieCommand.java` | ✅ Already extends `AbstractCommand` |
+| Handle `PlayerReadyEvent` | `HytaleZombiePlugin.java` | ✅ Registered in `start()` + sets World |
+| Game loop via Hytale's task system | `HytaleZombiePlugin.java` | ✅ Uses `TaskRegistration` |
+| Send messages with `Message` API | `HytaleZombieCommand.java` | ✅ Uses `Message.raw()` |
+| Entity registration with EntityModule | `HytaleZombiePlugin.java` | ✅ `setup()` calls `getEntityRegistry().registerEntity()` |
+| Damage event system | `ZombieDamageEventSystem.java` | ✅ Registered in `setup()` |
 
 ---
 
@@ -385,9 +483,15 @@ cd ~/Desktop/Code/Personal/HytaleZombies
 4. **`src/main/java/dev/hytalezombie/spawn/SpawnManager.java`** — Spawn node registry, random selection, position randomization
 5. **`src/main/java/dev/hytalezombie/config/HytaleZombieConfig.java`** — All tunable values (spawn delay, health, speed, costs)
 
-### To make it real in-game:
+### Entity spawning is now live:
 
-The **only** thing blocking a playable basic round is replacing the logical zombie creation in `GameSession.createZombie()` with actual Hytale entity spawning. Everything else — the timing, the counts, the scaling, the round advancement, the points — is fully built and tested.
+All five Hytale SDK integration steps are complete. When a player joins and `/hz start` is run:
+1. The `World` reference is captured from `PlayerReadyEvent`
+2. `createZombie()` spawns real `ZombieEntity` instances via `EntitySpawnHelper`
+3. `ZombieDamageEventSystem` forwards damage events for point tracking
+4. Entities are removed from the world on death or nuke
+
+The game loop, timing, scaling, points, and round advancement were already fully built and tested (138 unit tests).
 
 ---
 
@@ -436,15 +540,22 @@ The **only** thing blocking a playable basic round is replacing the logical zomb
 
 ```
 src/main/java/dev/hytalezombie/
-├── HytaleZombiePlugin.java             # Entry point + setupDefaultMap() + game loop
+├── HytaleZombiePlugin.java             # Entry point + setup() + start() + game loop
+│   ├── setup()                         # Registers ZombieEntity with EntityModule
+│   ├── start()                         # Registers commands, events, game loop
+│   └── setupDefaultMap()               # Default spawn points for testing
 ├── commands/
-│   └── HytaleZombieCommand.java        # /hytalezombie start|stop|round|info|map|setspawn|delspawn|listspawns|clearspawns|markzone|unmarkzone|listzones
+│   └── HytaleZombieCommand.java        # /hytalezombie command handler
 ├── config/
 │   └── HytaleZombieConfig.java         # All tunable values
+├── entity/
+│   ├── EntitySpawnHelper.java          # Assembles ECS entity holder and spawns into world
+│   └── ZombieEntity.java               # Zombie entity class (extends LivingEntity)
 ├── events/
 │   └── PlayerConnectionListener.java   # Player join utility
 ├── manager/
 │   ├── BarrierManager.java             # CRUD for window barriers
+│   ├── DebugManager.java               # Debug mode + spawn node visualization
 │   ├── GameManagerProvider.java        # Interface for accessing all managers
 │   ├── GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy)
 │   ├── PlayerDataManager.java          # Per-player state management
