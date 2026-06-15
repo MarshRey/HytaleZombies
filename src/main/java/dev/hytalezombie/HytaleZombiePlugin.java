@@ -361,24 +361,24 @@ public class HytaleZombiePlugin extends JavaPlugin {
      * @param originZ    world Z coordinate for the prefab origin
      */
     public void loadMap(@Nonnull Path prefabPath, int originX, int originY, int originZ) {
-        try {
-            getLogger().at(Level.INFO).log("Loading map prefab: {0}", prefabPath);
-            loadedMapPrefab = MapLoader.loadPrefab(prefabPath);
+        // Resolve relative paths against the plugin's data directory
+        Path resolvedPath = prefabPath;
+        if (!prefabPath.isAbsolute()) {
+            resolvedPath = getDataDirectory().resolve(prefabPath);
+        }
 
-            getLogger().at(Level.INFO).log(
-                "Prefab loaded: {0} blocks, bounds={1}x{2}x{3}, unresolved={4}",
-                new Object[]{
-                    loadedMapPrefab.blocks.size(),
-                    loadedMapPrefab.width, loadedMapPrefab.height, loadedMapPrefab.length,
-                    loadedMapPrefab.unresolvedCount
-                }
-            );
+        try {
+            getLogger().at(Level.INFO).log("Loading map prefab: " + resolvedPath.toAbsolutePath());
+            loadedMapPrefab = MapLoader.loadPrefab(resolvedPath);
+
+            getLogger().at(Level.INFO).log("Prefab loaded: " + loadedMapPrefab.blocks.size()
+                + " blocks, bounds=" + loadedMapPrefab.width + "x"
+                + loadedMapPrefab.height + "x" + loadedMapPrefab.length
+                + ", unresolved=" + loadedMapPrefab.unresolvedCount);
 
             if (gameSession.getWorld() == null) {
-                getLogger().at(Level.WARNING).log(
-                    "World reference not available yet. Map prefab parsed but not placed. " +
-                    "It will be placed automatically when a player joins and the world is available."
-                );
+                getLogger().at(Level.WARNING).log("World reference not available yet. Map prefab parsed but "
+                    + "not placed. It will be placed automatically when a player joins.");
                 mapLoaded = true;
                 loadedMapBounds = new MapLoader.PrefabBounds(
                     originX, originY, originZ,
@@ -391,36 +391,32 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
             World world = gameSession.getWorld();
             MapLoader.PrefabData prefab = loadedMapPrefab;
+            int clearPad = 20;
 
-            // Step 1: Clear the area (replace terrain with air) so the structure IS the world
-            int clearPad = 20; // Extra blocks of clearing beyond the structure
             getLogger().at(Level.INFO).log("Clearing terrain around structure...");
-
             MapLoader.clearAreaAsync(world,
                 originX - clearPad, 0, originZ - clearPad,
-                originX + prefab.width + clearPad, originY + prefab.height + clearPad, originZ + prefab.length + clearPad
+                originX + prefab.width + clearPad,
+                originY + prefab.height + clearPad,
+                originZ + prefab.length + clearPad
             ).thenCompose(v -> {
-                getLogger().at(Level.INFO).log("Terrain cleared. Placing structure blocks...");
-                // Step 2: Place the prefab blocks
+                getLogger().at(Level.INFO).log("Terrain cleared. Placing " + prefab.blocks.size() + " blocks...");
                 return MapLoader.placePrefabAsync(world, prefab, originX, originY, originZ);
             }).thenAccept(bounds -> {
                 loadedMapBounds = bounds;
                 mapLoaded = true;
-                getLogger().at(Level.INFO).log(
-                    "Map placed at ({0},{1},{2}) — bounds: ({3},{4},{5}) to ({6},{7},{8})",
-                    new Object[]{
-                        originX, originY, originZ,
-                        bounds.minX, bounds.minY, bounds.minZ,
-                        bounds.maxX, bounds.maxY, bounds.maxZ
-                    }
-                );
+                getLogger().at(Level.INFO).log("Map placed at (" + originX + "," + originY + "," + originZ
+                    + ") — bounds: (" + bounds.minX + "," + bounds.minY + "," + bounds.minZ
+                    + ") to (" + bounds.maxX + "," + bounds.maxY + "," + bounds.maxZ + ")");
             }).exceptionally(ex -> {
-                getLogger().at(Level.SEVERE).log("Failed to place map: {0}", ex.getMessage());
+                getLogger().at(Level.SEVERE).log("Failed to place map: " + ex.getMessage());
+                ex.printStackTrace();
                 return null;
             });
 
         } catch (Exception e) {
-            getLogger().at(Level.SEVERE).log("Failed to load map: {0}", e.getMessage());
+            getLogger().at(Level.SEVERE).log("Failed to load map: " + e.getClass().getName() + " - " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
