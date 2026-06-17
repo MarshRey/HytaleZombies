@@ -363,6 +363,9 @@ public class HytaleZombieCommand extends AbstractCommand {
         plugin.getSpawnManager().registerSpawnNode(node);
         plugin.getSpawnManager().markZoneOccupied(zoneId);
 
+        // Persist spawn nodes to disk (survives server restarts)
+        plugin.saveSpawnData();
+
         ctx.sendMessage(Message.raw("[HytaleZombie] Spawn point added!"));
         ctx.sendMessage(Message.raw("  Zone: " + zoneId));
         ctx.sendMessage(Message.raw("  Position: (" + String.format("%.1f", x) + ", " + String.format("%.1f", y) + ", " + String.format("%.1f", z) + ")"));
@@ -413,6 +416,7 @@ public class HytaleZombieCommand extends AbstractCommand {
 
             // Remove a specific node by index
             if (plugin.getSpawnManager().removeSpawnNode(zoneId, index)) {
+                plugin.saveSpawnData();
                 ctx.sendMessage(Message.raw("[HytaleZombie] Removed spawn node [" + index + "] from zone '" + zoneId + "'"));
             } else {
                 ctx.sendMessage(Message.raw("[HytaleZombie] Failed to remove spawn node [" + index + "]"));
@@ -420,6 +424,7 @@ public class HytaleZombieCommand extends AbstractCommand {
         } else {
             // Remove all nodes in this zone
             plugin.getSpawnManager().removeNodesInZone(zoneId);
+            plugin.saveSpawnData();
             ctx.sendMessage(Message.raw("[HytaleZombie] All spawn nodes in zone '" + zoneId + "' removed!"));
         }
     }
@@ -477,6 +482,7 @@ public class HytaleZombieCommand extends AbstractCommand {
      */
     private void handleClearSpawns(CommandContext ctx) {
         plugin.getSpawnManager().clearAllNodes();
+        plugin.saveSpawnData();
         ctx.sendMessage(Message.raw("[HytaleZombie] All spawn points cleared!"));
         ctx.sendMessage(Message.raw("  Use /hz setspawn <zone> to add new ones."));
     }
@@ -499,6 +505,7 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         String zoneId = args[1];
         plugin.getSpawnManager().markZoneOccupied(zoneId);
+        plugin.saveSpawnData();
         ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' marked as occupied! Zombies will now spawn here."));
     }
 
@@ -516,6 +523,7 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         String zoneId = args[1];
         plugin.getSpawnManager().markZoneUnoccupied(zoneId);
+        plugin.saveSpawnData();
         ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' marked as unoccupied."));
     }
 

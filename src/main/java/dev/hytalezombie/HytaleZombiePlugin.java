@@ -15,11 +15,13 @@ import dev.hytalezombie.config.HytaleZombieConfig;
 import dev.hytalezombie.entity.ZombieDamageEventSystem;
 import dev.hytalezombie.entity.ZombieEntity;
 import dev.hytalezombie.manager.*;
+import dev.hytalezombie.ui.ZombieHud;
 import dev.hytalezombie.model.Vector3f;
 import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.spawn.SpawnNode;
 
 import javax.annotation.Nonnull;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,6 +52,13 @@ public class HytaleZombiePlugin extends JavaPlugin {
     // Player entity refs for position tracking (playerId -> entityRef)
     private final Map<String, Ref<EntityStore>> playerEntityRefs;
 
+    // Custom HUD overlays per player (playerId -> ZombieHud)
+    private final Map<String, ZombieHud> playerHuds;
+
+    // Spawn node persistence
+    /** Path to the spawn nodes JSON file, relative to the server's run/ directory. */
+    static final Path SPAWN_DATA_PATH = Path.of("hytalezombie_data", "spawn_nodes.json");
+
     // Game loop scheduling
     private ScheduledExecutorService gameLoopExecutor;
     private TaskRegistration gameLoopTask;
@@ -62,6 +71,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
         super(init);
         this.config = new HytaleZombieConfig();
         this.playerEntityRefs = new ConcurrentHashMap<>();
+        this.playerHuds = new ConcurrentHashMap<>();
     }
 
     /**
@@ -90,6 +100,9 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
         // Initialize the scoreboard manager for HUD updates
         this.scoreboardManager = new ScoreboardManager(gameSession, playerDataManager);
+
+        // Load persisted spawn nodes (survives server restarts)
+        spawnManager.loadFromFile(SPAWN_DATA_PATH);
 
         getLogger().at(Level.INFO).log("HytaleZombie initialization complete.");
         return CompletableFuture.completedFuture(null);
@@ -172,6 +185,28 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 if (playerRef != null) {
                     // Register the player in the scoreboard manager
                     scoreboardManager.registerPlayer(playerId, playerRef);
+
+                    // Create and register the Custom HUD overlay for this player
+                    try {
+                        com.hypixel.hytale.server.core.entity.entities.Player playerEntity =
+                            event.getPlayerRef().getStore().getComponent(
+                                event.getPlayerRef(),
+                                com.hypixel.hytale.server.core.entity.entities.Player.getComponentType()
+                            );
+                        if (playerEntity != null) {
+                            com.hypixel.hytale.server.core.entity.entities.player.hud.HudManager hudManager =
+                                playerEntity.getHudManager();
+                            ZombieHud zombieHud = new ZombieHud(playerRef);
+                            hudManager.addCustomHud(playerRef, zombieHud);
+                            playerHuds.put(playerId, zombieHud);
+                            getLogger().at(Level.FINE).log("Custom HUD registered for player {0}", playerId);
+                        }
+                    } catch (Exception e) {
+                        getLogger().at(Level.WARNING).log(
+                            "Failed to register Custom HUD for player {0}: {1}",
+                            playerId, e.getMessage()
+                        );
+                    }
                     playerRef.sendMessage(
                         Message.raw("[HytaleZombie] Welcome! Type /hytalezombie for help.")
                     );
@@ -214,6 +249,8 @@ public class HytaleZombiePlugin extends JavaPlugin {
                         if (scoreboardManager != null) {
                             scoreboardManager.tick();
                         }
+                        // Update Custom HUD overlays for all players
+                        tickHudUpdates();
                         // Periodically update player positions for zombie AI targeting
                         tickPlayerPositionUpdates();
                     } catch (Exception e) {
@@ -271,6 +308,47 @@ public class HytaleZombiePlugin extends JavaPlugin {
         }
     }
 
+    /** How many ticks between HUD updates (20 ticks = 1 second). */
+    private static final int HUD_UPDATE_INTERVAL = 20;
+
+    private int hudUpdateCounter;
+
+    /**
+     * Periodically updates all player Custom HUD overlays with current
+     * game state (round, zombie count, points).
+     */
+    private void tickHudUpdates() {
+        if (playerHuds.isEmpty()) return;
+
+        hudUpdateCounter++;
+        if (hudUpdateCounter < HUD_UPDATE_INTERVAL) return;
+        hudUpdateCounter = 0;
+
+        if (gameSession == null) return;
+
+        int round = gameSession.getRoundManager().getCurrentRound();
+        int activeZombies = gameSession.getActiveZombieCount();
+        int totalZombies = gameSession.getTotalZombiesForRound();
+
+        for (Map.Entry<String, ZombieHud> entry : playerHuds.entrySet()) {
+            String playerId = entry.getKey();
+            ZombieHud hud = entry.getValue();
+            if (hud == null) continue;
+
+            try {
+                int points = 0;
+                dev.hytalezombie.model.PlayerData data = playerDataManager.getPlayerData(playerId);
+                if (data != null) {
+                    points = data.getPoints();
+                }
+                hud.updateDisplay(round, activeZombies, totalZombies, points);
+            } catch (Exception e) {
+                getLogger().at(Level.FINE).log("Failed to update HUD for player {0}: {1}",
+                    playerId, e.getMessage());
+            }
+        }
+    }
+
     /**
      * Sets up a default test map with basic zones, spawn nodes, and barriers.
      * Call this after starting a match to have a playable layout.
@@ -279,11 +357,21 @@ public class HytaleZombiePlugin extends JavaPlugin {
      * Place .schematic/.litematic files on the server and use the mod's commands.</p>
      */
     public void setupDefaultMap() {
-        spawnManager.clearAllNodes();
+        // Only set up defaults on first run (no spawn nodes registered yet).
+        // Subsequent calls preserve user-placed spawn nodes loaded from persistence.
+        if (spawnManager.getTotalSpawnCount() > 0) {
+            getLogger().at(Level.INFO).log(
+                "Spawn nodes already registered ({0} total) — skipping default map setup.",
+                spawnManager.getTotalSpawnCount()
+            );
+            return;
+        }
+
         spawnManager.markZoneOccupied("spawn_room");
+        saveSpawnData();
 
         getLogger().at(Level.INFO).log(
-            "Default map zone marked. Use the SchematicImporter mod to import .schematic/.litematic files."
+            "Default map zone 'spawn_room' marked. Use /hz setspawn to place spawn points."
         );
     }
 
@@ -338,6 +426,16 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
     public ScoreboardManager getScoreboardManager() {
         return scoreboardManager;
+    }
+
+    /**
+     * Saves the current spawn nodes and occupied zones to disk.
+     * Called automatically after every spawn mutation command.
+     */
+    public void saveSpawnData() {
+        if (spawnManager != null) {
+            spawnManager.saveToFile(SPAWN_DATA_PATH);
+        }
     }
 
     public void setSpawnManager(SpawnManager spawnManager) {

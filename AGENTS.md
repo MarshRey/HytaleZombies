@@ -577,7 +577,8 @@ src/main/java/dev/hytalezombie/
     ??? SpawnNode.java                  # A single spawn point (zoneId, position, radius)
 ??? manager/
 ?   ??? ...                             # (existing managers)
-?   ??? ScoreboardManager.java          # NEW: Persistent HUD display (round, zombies, points)
+?   ??? ScoreboardManager.java          # Player tracking + HUD state bridge
+│ ?   ??? ZombieHud.java                  # Custom HUD overlay (CustomUIHud API) (round, zombies, points)
 ```
 
 ---
@@ -598,7 +599,13 @@ src/main/java/dev/hytalezombie/
 **Feature**: Zombies move toward a target point at scaled speed using tick-based movement synced to Hytale entity `TransformComponent` positions via `world.execute()`.
 
 ### ✅ Phase 4: Persistent Scoreboard / HUD
-**Feature**: `ScoreboardManager` sends periodic updates to all players every 20 ticks showing round, zombie count, and player points.
+**Feature**: Chat-based scoreboard via `ScoreboardManager` (since replaced by Custom HUD in Phase 6).
+
+### ✅ Phase 4.5: Custom HUD Overlay
+**Feature**: Replaced chat-based scoreboard with a proper server-driven Custom HUD overlay via Hytale's `CustomUIHud` API. The `ZombieHud` class (in `ui/`) shows round number, active zombie count, and player points as a persistent overlay in the top-right corner using `.ui` markup at `Common/UI/Custom/Hud/ZombieHud.ui`. Registered per-player via `HudManager.addCustomHud()` on join, updated every 20 ticks from the game loop.
+
+### ✅ Phase 4.6: Spawn Node Persistence
+**Feature**: Spawn nodes and occupied zones are automatically saved to `run/hytalezombie_data/spawn_nodes.json` after every mutation command (`setspawn`, `delspawn`, `clearspawns`, `markzone`, `unmarkzone`). Loaded on plugin startup via `SpawnManager.loadFromFile()`. Uses Gson for JSON serialization. Survives server restarts.
 
 ### ✅ Phase 5: Fixed NPC Role Loading, Desync, and Loot Drops
 **Bug 1 (Role not found)**: `hz_zombie.json` referenced `Template_Creature` (doesn't exist). The NPCPlugin's `AssetRegistryLoader` loads from `src/main/resources/Server/` — the role was only at `assets/hytalezombie/Server/NPC/Roles/`, unreachable from the CLASSPATH dev path.

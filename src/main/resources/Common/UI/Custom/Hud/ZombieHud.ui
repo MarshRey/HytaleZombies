@@ -1,0 +1,32 @@
+$C = "../Common.ui";
+
+Group {
+  LayoutMode: Top;
+  Anchor: (Top: 20, Right: 20, Width: 240);
+
+  Group #HudContainer {
+    Background: #0a0a0f(0.85);
+    Padding: (Horizontal: 16, Vertical: 12);
+    LayoutMode: Top;
+
+    // Round indicator
+    Label #RoundLabel {
+      Style: (FontSize: 26, TextColor: #E8A93B, RenderBold: true);
+      Text: "Round 1";
+    }
+
+    // Zombie count
+    Label #ZombieLabel {
+      Style: (...$C.@DefaultLabelStyle, FontSize: 16);
+      Text: "Zombies: 0 / 0";
+      Anchor: (Top: 6);
+    }
+
+    // Points display
+    Label #PointsLabel {
+      Style: (...$C.@DefaultLabelStyle, FontSize: 16, TextColor: #7acc7a);
+      Text: "Points: 0";
+      Anchor: (Top: 4);
+    }
+  }
+}

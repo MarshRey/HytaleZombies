@@ -1,8 +1,17 @@
 package dev.hytalezombie.spawn;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
 import dev.hytalezombie.model.Vector3f;
 
 import javax.annotation.Nonnull;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.lang.reflect.Type;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -174,6 +183,112 @@ public class SpawnManager {
     public boolean hasNodesInZone(@Nonnull String zoneId) {
         List<SpawnNode> nodes = zoneSpawnNodes.get(zoneId);
         return nodes != null && !nodes.isEmpty();
+    }
+
+    // ==================== PERSISTENCE ====================
+
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+
+    /** JSON-serializable representation of a single spawn node. */
+    @SuppressWarnings("unused")
+    private static final class SerializedSpawnNode {
+        float x;
+        float y;
+        float z;
+        float radius;
+
+        SerializedSpawnNode(float x, float y, float z, float radius) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.radius = radius;
+        }
+    }
+
+    /** Top-level JSON structure for spawn persistence. */
+    @SuppressWarnings("unused")
+    private static final class SpawnData {
+        Map<String, List<SerializedSpawnNode>> zoneSpawnNodes;
+        Set<String> occupiedZones;
+    }
+
+    /**
+     * Saves all spawn nodes and occupied zones to a JSON file.
+     * Called after any mutation command (setspawn, delspawn, clearspawns, markzone, unmarkzone).
+     *
+     * @param filePath path to the JSON file (e.g., run/hytalezombie_data/spawn_nodes.json)
+     */
+    public void saveToFile(@Nonnull Path filePath) {
+        SpawnData data = new SpawnData();
+        data.zoneSpawnNodes = new LinkedHashMap<>();
+        data.occupiedZones = new LinkedHashSet<>(occupiedZones);
+
+        for (Map.Entry<String, List<SpawnNode>> entry : zoneSpawnNodes.entrySet()) {
+            List<SerializedSpawnNode> serialized = new ArrayList<>();
+            for (SpawnNode node : entry.getValue()) {
+                serialized.add(new SerializedSpawnNode(
+                    node.getPosition().x(),
+                    node.getPosition().y(),
+                    node.getPosition().z(),
+                    node.getSpawnRadius()
+                ));
+            }
+            data.zoneSpawnNodes.put(entry.getKey(), serialized);
+        }
+
+        try {
+            Files.createDirectories(filePath.getParent());
+            try (Writer writer = Files.newBufferedWriter(filePath)) {
+                GSON.toJson(data, writer);
+            }
+            LOGGER.log(Level.INFO, "Saved {0} spawn nodes across {1} zones to {2}",
+                    new Object[]{getTotalSpawnCount(), zoneSpawnNodes.size(), filePath});
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to save spawn nodes to {0}: {1}",
+                    new Object[]{filePath, e.getMessage()});
+        }
+    }
+
+    /**
+     * Loads spawn nodes and occupied zones from a JSON file.
+     * Called once during plugin startup. If the file doesn't exist,
+     * starts with an empty state (no nodes registered).
+     *
+     * @param filePath path to the JSON file (e.g., run/hytalezombie_data/spawn_nodes.json)
+     */
+    public void loadFromFile(@Nonnull Path filePath) {
+        if (!Files.exists(filePath)) {
+            LOGGER.log(Level.INFO, "No spawn data file found at {0} — starting with empty spawn nodes.", filePath);
+            return;
+        }
+
+        try (Reader reader = Files.newBufferedReader(filePath)) {
+            SpawnData data = GSON.fromJson(reader, SpawnData.class);
+            if (data == null) return;
+
+            if (data.zoneSpawnNodes != null) {
+                for (Map.Entry<String, List<SerializedSpawnNode>> entry : data.zoneSpawnNodes.entrySet()) {
+                    String zoneId = entry.getKey();
+                    for (SerializedSpawnNode s : entry.getValue()) {
+                        registerSpawnNode(new SpawnNode(
+                            zoneId,
+                            new Vector3f(s.x, s.y, s.z),
+                            s.radius
+                        ));
+                    }
+                }
+            }
+
+            if (data.occupiedZones != null) {
+                occupiedZones.addAll(data.occupiedZones);
+            }
+
+            LOGGER.log(Level.INFO, "Loaded {0} spawn nodes across {1} zones from {2}",
+                    new Object[]{getTotalSpawnCount(), zoneSpawnNodes.size(), filePath});
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to load spawn nodes from {0}: {1}",
+                    new Object[]{filePath, e.getMessage()});
+        }
     }
 }
 

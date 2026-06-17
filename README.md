@@ -190,12 +190,12 @@ Requires the `hytalezombie.admin` permission.
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Spawn system | Done | Interval-based zombie spawning at configurable spawn points |
+| Spawn system | Done | Interval-based zombie spawning at configurable spawn points; persisted to JSON (survives restarts) |
 | Round progression | Done | Auto-advance with scaling difficulty (HP, speed, count) |
 | Economy / Points | Done | Points for hits/kills, spend on weapons, perks, doors |
 | Power-ups | Done | Nuke, Insta-Kill, Double Points, Max Ammo, Carpenter, etc. |
 | Zombie AI | Done | NPC-based AI via Template_Aggressive_Zombies — built-in hostile pursuit, pathfinding, death animation; UUID-tracked |
-| Persistent HUD | Done | Scoreboard updates every second (round, zombies, points) |
+| Custom HUD | Done | Server-driven HUD overlay via CustomUIHud API (round, zombies, points) — replaces chat-based scoreboard |
 | Entity integration | Done | NPCPlugin spawning with custom hz_zombie role; UUID-based damage routing; NPC death system handles despawn; DropList:Empty = no loot |
 | 12 Perks | Done | Juggernog, Speed Cola, Quick Revive, etc. |
 | 7 Power-ups | Done | All classic zombie power-ups implemented |
@@ -278,11 +278,13 @@ src/
         DebugManager.java           # Debug mode + in-world visualization
         GameManagerProvider.java    # Manager access interface
         GameSession.java            # MAIN ORCHESTRATOR (tick, spawn, damage, economy, AI)
-        ScoreboardManager.java      # Persistent HUD display (round/zombies/points)
+        ScoreboardManager.java      # Player tracking + HUD state bridge
         PlayerDataManager.java      # Per-player state
         RoundManager.java           # Round tracking + scaling math
         WeaponRegistry.java         # Weapon definitions
         ZoneManager.java            # Map zone connectivity + doors
+      ui/
+        ZombieHud.java              # Custom HUD overlay (CustomUIHud API)
       model/
         Barrier.java                # Barrier state machine
         MapZone.java                # Named zone with door cost
@@ -297,6 +299,7 @@ src/
         SpawnNode.java              # Single spawn point (zone, position, radius)
     resources/
       manifest.json                 # Plugin manifest
+      Common/UI/Custom/Hud/ZombieHud.ui  # Custom HUD markup (round/zombies/points)
       assets/hytalezombie/Server/NPC/Roles/hz_zombie.json  # NPC role (MODS distribution)
       Server/NPC/Roles/hz_zombie.json    # NPC role (CLASSPATH dev)
   test/
