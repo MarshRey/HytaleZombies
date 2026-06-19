@@ -61,6 +61,14 @@ public class MapZone {
         connectedZoneIds.add(zoneId);
     }
 
+    /**
+     * Removes a connection to another zone.
+     */
+    public void removeConnectedZone(@Nonnull String zoneId) {
+        connectedZoneIds.remove(zoneId);
+        doorAreas.remove(zoneId);
+    }
+
     @Nonnull
     public Set<String> getConnectedZoneIds() {
         return Set.copyOf(connectedZoneIds);

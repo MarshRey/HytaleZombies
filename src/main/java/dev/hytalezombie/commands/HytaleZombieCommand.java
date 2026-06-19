@@ -195,6 +195,10 @@ public class HytaleZombieCommand extends AbstractCommand {
                 handleSetDoor(ctx, args);
                 break;
 
+            case "removezone":
+                handleRemoveZone(ctx, args);
+                break;
+
             case "markzone":
                 handleMarkZone(ctx, args);
                 break;
@@ -241,7 +245,8 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("Zones:"));
         ctx.sendMessage(Message.raw("  /hz addzone <zone> <name> [cost]      - Register a new zone"));
         ctx.sendMessage(Message.raw("  /hz connectzone <zoneA> <zoneB>       - Connect two zones"));
-        ctx.sendMessage(Message.raw("  /hz setdoor <zoneA> <zoneB> <x> <y> <z> [w] [h] - Place door area between zones"));
+        ctx.sendMessage(Message.raw("  /hz setdoor <A> <B> <x1> <y1> <z1> <x2> <y2> <z2> - Place door (two corners)"));
+        ctx.sendMessage(Message.raw("  /hz removezone <zone>                 - Remove a zone (cleans up connections)"));
         ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
         ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
         ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones with spawns"));
@@ -559,69 +564,77 @@ public class HytaleZombieCommand extends AbstractCommand {
     }
 
     /**
-     * /hz setdoor <zoneA> <zoneB> <x> <y> <z> [width] [height]
+     * /hz setdoor <zoneA> <zoneB> <x1> <y1> <z1> <x2> <y2> <z2>
      *
-     * Sets a door area (axis-aligned box) between two connected zones.
-     * When a player's position enters this area, they transition
-     * between zones automatically.
-     *
-     * <p>Default door size is 1 wide × 3 tall × 1 deep (matching a standard
-     * Hytale doorway). Use [width] and [height] for larger openings like
-     * double-doors or archways.</p>
+     * Sets a door area between two connected zones using two corner points.
+     * Stand at one side of the doorway, run the command; stand at the other side,
+     * run it again with the second corner. The door becomes the full rectangular
+     * area between the two points — works for any width/height/depth.
      *
      * <p>Both zones must already be connected via /hz connectzone.</p>
      */
     private void handleSetDoor(CommandContext ctx, String[] args) {
-        if (args.length < 6) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setdoor <zoneA> <zoneB> <x> <y> <z> [width] [height]"));
-            ctx.sendMessage(Message.raw("  Example: /hz setdoor spawn_room room_2 10.5 64 -5.0"));
-            ctx.sendMessage(Message.raw("  Double door: /hz setdoor spawn_room room_2 10.5 64 -5.0 2.0 3.0"));
-            ctx.sendMessage(Message.raw("  Width/height default to 1.0/3.0 blocks. Players entering the area cross zones."));
+        if (args.length < 9) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setdoor <zoneA> <zoneB> <x1> <y1> <z1> <x2> <y2> <z2>"));
+            ctx.sendMessage(Message.raw("  Stand at one side of the door: /hz setdoor spawn_room room_2 10.5 64 -5.0"));
+            ctx.sendMessage(Message.raw("  Then stand at the other side:   (same command with second position)"));
+            ctx.sendMessage(Message.raw("  The door area is the AABB between the two points. Use all 6 coords at once."));
+            ctx.sendMessage(Message.raw("  Example one-liner: /hz setdoor spawn_room room_2 10 64 -5 12 67 -5"));
             return;
         }
 
         String zoneA = args[1];
         String zoneB = args[2];
-        float x, y, z;
+        float x1, y1, z1, x2, y2, z2;
         try {
-            x = Float.parseFloat(args[3]);
-            y = Float.parseFloat(args[4]);
-            z = Float.parseFloat(args[5]);
+            x1 = Float.parseFloat(args[3]);
+            y1 = Float.parseFloat(args[4]);
+            z1 = Float.parseFloat(args[5]);
+            x2 = Float.parseFloat(args[6]);
+            y2 = Float.parseFloat(args[7]);
+            z2 = Float.parseFloat(args[8]);
         } catch (NumberFormatException e) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use numbers for x, y, z."));
+            ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use numbers for all 6 values."));
             return;
-        }
-
-        float width = dev.hytalezombie.model.DoorArea.DEFAULT_WIDTH;
-        float height = dev.hytalezombie.model.DoorArea.DEFAULT_HEIGHT;
-        if (args.length > 6) {
-            try {
-                width = Float.parseFloat(args[6]);
-            } catch (NumberFormatException e) {
-                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid width: " + args[6]));
-                return;
-            }
-        }
-        if (args.length > 7) {
-            try {
-                height = Float.parseFloat(args[7]);
-            } catch (NumberFormatException e) {
-                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid height: " + args[7]));
-                return;
-            }
         }
 
         try {
             plugin.getZoneManager().setDoorArea(zoneA, zoneB,
-                new dev.hytalezombie.model.Vector3f(x, y, z), width, height);
+                new dev.hytalezombie.model.Vector3f(x1, y1, z1),
+                new dev.hytalezombie.model.Vector3f(x2, y2, z2));
         } catch (IllegalArgumentException e) {
             ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
             return;
         }
 
+        var area = plugin.getZoneManager().getDoorArea(zoneA, zoneB);
         ctx.sendMessage(Message.raw("[HytaleZombie] Door area placed between '" + zoneA + "' and '"
-            + zoneB + "' at " + x + ", " + y + ", " + z
-            + " (" + width + "×" + height + "). Players entering this area will cross zones."));
+            + zoneB + "'. " + (area != null ? area.toString() : "")
+            + ". Players entering this area will cross zones."));
+    }
+
+    /**
+     * /hz removezone <zoneId>
+     *
+     * Removes a zone and cleans up all connections, door areas, and spawn nodes.
+     * The starting zone cannot be removed.
+     */
+    private void handleRemoveZone(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz removezone <zoneId>"));
+            ctx.sendMessage(Message.raw("  Removes the zone, its door areas, and spawn nodes."));
+            ctx.sendMessage(Message.raw("  Connected zones are cleaned up automatically."));
+            return;
+        }
+
+        String zoneId = args[1];
+        try {
+            plugin.getZoneManager().removeZone(zoneId, plugin.getSpawnManager());
+            plugin.saveSpawnData();
+            ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' removed. All connections and spawns cleaned up."));
+        } catch (IllegalArgumentException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
+        }
     }
 
     /**
@@ -663,27 +676,56 @@ public class HytaleZombieCommand extends AbstractCommand {
     /**
      * /hz listzones
      *
-     * Lists all zones that have spawn nodes registered.
+     * Lists all registered zones from ZoneManager, including zones without spawn points.
+     * Shows zone info (name, cost, door connections, door areas) and spawn node counts.
      */
     private void handleListZones(CommandContext ctx) {
-        java.util.Set<String> zoneIds = plugin.getSpawnManager().getZoneIds();
+        var zoneManager = plugin.getZoneManager();
+        var spawnManager = plugin.getSpawnManager();
+        java.util.Collection<dev.hytalezombie.model.MapZone> allZones = zoneManager.getAllZones();
         java.util.Set<String> occupied = plugin.getSpawnManager().getOccupiedZones();
 
-        ctx.sendMessage(Message.raw("=== Registered Zones (" + zoneIds.size() + ") ==="));
+        ctx.sendMessage(Message.raw("=== Zones (" + allZones.size() + " registered) ==="));
 
-        if (zoneIds.isEmpty()) {
-            ctx.sendMessage(Message.raw("  No zones registered."));
-            ctx.sendMessage(Message.raw("  Use /hz setspawn <zone> [radius] to add one."));
+        if (allZones.isEmpty()) {
+            ctx.sendMessage(Message.raw("  No zones registered. Use /hz addzone to create one."));
             return;
         }
 
-        for (String zoneId : zoneIds) {
-            java.util.List<SpawnNode> nodes = plugin.getSpawnManager().getNodesInZone(zoneId);
+        for (dev.hytalezombie.model.MapZone zone : allZones) {
+            String zoneId = zone.getZoneId();
+            java.util.List<SpawnNode> nodes = spawnManager.getNodesInZone(zoneId);
             boolean isOccupied = occupied.contains(zoneId);
-            String status = isOccupied ? "ACTIVE" : "inactive";
-            String markHint = isOccupied ? "" : "  (/hz markzone " + zoneId + " to enable)";
-            ctx.sendMessage(Message.raw("  * " + zoneId + " - " + nodes.size() + " spawns - " + status + markHint));
+            boolean isUnlocked = zone.isUnlocked();
+            String lockIcon = isUnlocked ? "" : " [LOCKED]";
+            String status = isOccupied ? "ACTIVE" : (isUnlocked ? "open" : "locked");
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("  * ").append(zoneId).append(lockIcon);
+            sb.append(" \"").append(zone.getDisplayName()).append("\"");
+            sb.append(" — ").append(nodes.size()).append(" spawns");
+            if (zone.getDoorCost() > 0) {
+                sb.append(", cost=").append(zone.getDoorCost());
+            }
+            sb.append(", ").append(zone.getConnectedZoneIds().size()).append(" connections");
+
+            var doorAreas = zone.getDoorAreas();
+            if (!doorAreas.isEmpty()) {
+                sb.append(", ").append(doorAreas.size()).append(" doors");
+            }
+
+            String markHint = (!isOccupied && isUnlocked) ? "  (/hz markzone " + zoneId + " to activate)" : "";
+            if (!markHint.isEmpty()) {
+                sb.append(markHint);
+            }
+
+            if (nodes.isEmpty() && spawnManager.getZoneIds().contains(zoneId)) {
+                // Zone has spawns in SpawnManager but maybe from a different tracking
+            }
+
+            ctx.sendMessage(Message.raw("    " + sb.toString().trim()));
         }
+        ctx.sendMessage(Message.raw("Tip: zones auto-track occupancy from player positions via door-crossing."));
     }
 
     // ========================================================================
@@ -1246,5 +1288,40 @@ public class HytaleZombieCommand extends AbstractCommand {
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    // ========================================================================
+    //  TAB COMPLETION
+    // ========================================================================
+
+    public java.util.List<String> getSuggestions(CommandContext ctx) {
+        String input = ctx.getInputString();
+        String[] parts = (input == null || input.isEmpty()) ? new String[0] : input.split(" ");
+
+        // Suggest subcommands
+        if (parts.length <= 1) {
+            return java.util.List.of(
+                "start", "stop", "round", "info", "state", "nextround",
+                "setspawn", "delspawn", "listspawns", "clearspawns",
+                "addzone", "connectzone", "setdoor", "removezone",
+                "markzone", "unmarkzone", "listzones",
+                "spawnzombie", "spawnhere", "killall", "zombieinfo", "spawninfo",
+                "points", "powerup", "giveweapon", "giveperk",
+                "debug", "config"
+            );
+        }
+
+        // Suggest zone names for zone-related commands
+        String sub = parts[0].toLowerCase();
+        if (sub.equals("hytalezombie") || sub.equals("hz") || sub.equals("zombie")) {
+            if (parts.length > 1) sub = parts[1].toLowerCase();
+        }
+        if (java.util.Set.of("setspawn", "delspawn", "addzone", "connectzone",
+                "setdoor", "removezone", "markzone", "unmarkzone", "spawnzombie").contains(sub)) {
+            return plugin.getZoneManager().getAllZones().stream()
+                .map(dev.hytalezombie.model.MapZone::getZoneId)
+                .collect(java.util.stream.Collectors.toList());
+        }
+        return java.util.List.of();
     }
 }

@@ -7,31 +7,24 @@ import java.util.Objects;
  * Defines a door area between two zones as an axis-aligned bounding box.
  * A player crossing through any part of this area triggers a zone transition.
  *
- * <p>The area is defined by a center point with configurable width (X),
- * height (Y), and depth (Z). Defaults: width=1.0, height=3.0, depth=1.0
- * which creates a 1×3×1 block doorway.</p>
+ * <p>The area is defined by two opposite corner points. The AABB is computed
+ * from the min/max of each axis, so the two points can be given in any order
+ * and the door will always encompass the full rectangular region between them.
+ * This makes it intuitive: "stand at one side of the doorway, record position;
+ * stand at the other side, record position."</p>
  */
-public record DoorArea(@Nonnull Vector3f center, float width, float height, float depth) {
-
-    /** Default door width in blocks (X axis). */
-    public static final float DEFAULT_WIDTH = 1.0f;
-    /** Default door height in blocks (Y axis). */
-    public static final float DEFAULT_HEIGHT = 3.0f;
-    /** Default door depth in blocks (Z axis). */
-    public static final float DEFAULT_DEPTH = 1.0f;
+public record DoorArea(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
 
     /**
-     * Creates a door area with default depth (1.0).
+     * Creates a DoorArea from two opposite corner positions.
+     * Order doesn't matter — min/max are computed from the two points.
      */
-    public DoorArea(@Nonnull Vector3f center, float width, float height) {
-        this(center, width, height, DEFAULT_DEPTH);
-    }
-
-    /**
-     * Creates a door area with default size (1×3×1).
-     */
-    public DoorArea(@Nonnull Vector3f center) {
-        this(center, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_DEPTH);
+    @Nonnull
+    public static DoorArea fromCorners(@Nonnull Vector3f a, @Nonnull Vector3f b) {
+        return new DoorArea(
+            Math.min(a.x(), b.x()), Math.min(a.y(), b.y()), Math.min(a.z(), b.z()),
+            Math.max(a.x(), b.x()), Math.max(a.y(), b.y()), Math.max(a.z(), b.z())
+        );
     }
 
     /**
@@ -39,17 +32,22 @@ public record DoorArea(@Nonnull Vector3f center, float width, float height, floa
      * Uses axis-aligned bounding box containment (inclusive on all edges).
      */
     public boolean contains(@Nonnull Vector3f pos) {
-        float halfW = width / 2f;
-        float halfH = height / 2f;
-        float halfD = depth / 2f;
-        return pos.x() >= center.x() - halfW && pos.x() <= center.x() + halfW
-            && pos.y() >= center.y() - halfH && pos.y() <= center.y() + halfH
-            && pos.z() >= center.z() - halfD && pos.z() <= center.z() + halfD;
+        return pos.x() >= minX && pos.x() <= maxX
+            && pos.y() >= minY && pos.y() <= maxY
+            && pos.z() >= minZ && pos.z() <= maxZ;
     }
+
+    /** Width along X axis. */
+    public float width() { return maxX - minX; }
+    /** Height along Y axis. */
+    public float height() { return maxY - minY; }
+    /** Depth along Z axis. */
+    public float depth() { return maxZ - minZ; }
 
     @Override
     public String toString() {
-        return "DoorArea{center=" + center + ", w=" + width + ", h=" + height + ", d=" + depth + "}";
+        return "DoorArea[" + minX + ".." + maxX + ", " + minY + ".." + maxY + ", " + minZ + ".." + maxZ
+            + "] (" + width() + "×" + height() + "×" + depth() + ")";
     }
 
     @Override
@@ -57,14 +55,16 @@ public record DoorArea(@Nonnull Vector3f center, float width, float height, floa
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         DoorArea doorArea = (DoorArea) o;
-        return Float.compare(width, doorArea.width) == 0
-            && Float.compare(height, doorArea.height) == 0
-            && Float.compare(depth, doorArea.depth) == 0
-            && center.equals(doorArea.center);
+        return Float.compare(minX, doorArea.minX) == 0
+            && Float.compare(minY, doorArea.minY) == 0
+            && Float.compare(minZ, doorArea.minZ) == 0
+            && Float.compare(maxX, doorArea.maxX) == 0
+            && Float.compare(maxY, doorArea.maxY) == 0
+            && Float.compare(maxZ, doorArea.maxZ) == 0;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(center, width, height, depth);
+        return Objects.hash(minX, minY, minZ, maxX, maxY, maxZ);
     }
 }

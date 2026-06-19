@@ -1,6 +1,7 @@
 package dev.hytalezombie.manager;
 
 import dev.hytalezombie.model.DoorArea;
+import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.model.MapZone;
 import dev.hytalezombie.model.Vector3f;
 
@@ -111,18 +112,19 @@ public class ZoneManager {
     // ==================== DOOR AREA MANAGEMENT ====================
 
     /**
-     * Sets a door area between two connected zones.
-     * The area is stored on both zones for bidirectional crossing detection.
+     * Sets a door area between two connected zones using two corner points.
+     * The AABB is computed from min/max of the two points — order doesn't matter.
+     * "Stand at one side of the doorway, record position; stand at the
+     * other side, record position." The resulting box can be any width/height/depth.
      *
-     * @param zoneIdA  first zone
-     * @param zoneIdB  second zone
-     * @param center   center of the door area
-     * @param width    door width in blocks (X axis, default 1.0)
-     * @param height   door height in blocks (Y axis, default 3.0)
+     * @param zoneIdA first zone
+     * @param zoneIdB second zone
+     * @param corner1 one corner of the door area
+     * @param corner2 opposite corner of the door area
      * @throws IllegalArgumentException if zones are not found or not connected
      */
     public void setDoorArea(@Nonnull String zoneIdA, @Nonnull String zoneIdB,
-                            @Nonnull Vector3f center, float width, float height) {
+                            @Nonnull Vector3f corner1, @Nonnull Vector3f corner2) {
         MapZone zoneA = zones.get(zoneIdA);
         MapZone zoneB = zones.get(zoneIdB);
         if (zoneA == null) throw new IllegalArgumentException("Zone not found: " + zoneIdA);
@@ -133,19 +135,11 @@ public class ZoneManager {
                 + "Call connectZones() first.");
         }
 
-        DoorArea area = new DoorArea(center, width, height);
+        DoorArea area = DoorArea.fromCorners(corner1, corner2);
         zoneA.setDoorArea(zoneIdB, area);
         zoneB.setDoorArea(zoneIdA, area);
         LOGGER.log(Level.INFO, "Door area set: {0} <-> {1} — {2}",
                 new Object[]{zoneIdA, zoneIdB, area});
-    }
-
-    /**
-     * Sets a door area with default size (1×3×1).
-     */
-    public void setDoorArea(@Nonnull String zoneIdA, @Nonnull String zoneIdB,
-                            @Nonnull Vector3f center) {
-        setDoorArea(zoneIdA, zoneIdB, center, DoorArea.DEFAULT_WIDTH, DoorArea.DEFAULT_HEIGHT);
     }
 
     /**
@@ -238,5 +232,52 @@ public class ZoneManager {
         MapZone spawnZone = new MapZone(startingZoneId, "Spawn Room", 0);
         spawnZone.setUnlocked(true);
         zones.put(startingZoneId, spawnZone);
+    }
+
+    // ==================== ZONE REMOVAL ====================
+
+    /**
+     * Removes a zone and cleans up all references to it.
+     * <ul>
+     *   <li>Removes door areas from connected zones that reference this zone</li>
+     *   <li>Removes this zone's ID from connected zones' connection lists</li>
+     *   <li>Removes spawn nodes in this zone from SpawnManager</li>
+     *   <li>Marks the zone as unoccupied in SpawnManager</li>
+     * </ul>
+     *
+     * <p>The starting zone cannot be removed.</p>
+     *
+     * @param zoneId      the zone to remove
+     * @param spawnManager for cleaning up spawn nodes
+     * @throws IllegalArgumentException if trying to remove the starting zone
+     */
+    public void removeZone(@Nonnull String zoneId, @Nonnull SpawnManager spawnManager) {
+        if (zoneId.equals(startingZoneId)) {
+            throw new IllegalArgumentException(
+                "Cannot remove the starting zone '" + startingZoneId + "'.");
+        }
+
+        MapZone zone = zones.remove(zoneId);
+        if (zone == null) {
+            LOGGER.log(Level.WARNING, "Zone not found for removal: {0}", zoneId);
+            return;
+        }
+
+        // Clean up references in all connected zones
+        for (String connectedId : zone.getConnectedZoneIds()) {
+            MapZone connected = zones.get(connectedId);
+            if (connected != null) {
+                connected.removeConnectedZone(zoneId);
+                LOGGER.log(Level.FINE, "Cleaned connection and door area from {0} → {1}",
+                        new Object[]{connectedId, zoneId});
+            }
+        }
+
+        // Remove spawn nodes and occupancy for this zone
+        spawnManager.removeNodesInZone(zoneId);
+        spawnManager.markZoneUnoccupied(zoneId);
+
+        LOGGER.log(Level.INFO, "Zone removed: {0} ({1}). Cleaned up {2} door references.",
+                new Object[]{zoneId, zone.getDisplayName(), zone.getConnectedZoneIds().size()});
     }
 }
