@@ -377,6 +377,15 @@ public class HytaleZombieCommand extends AbstractCommand {
             }
         }
 
+        // Auto-create zone in ZoneManager if it doesn't exist yet
+        if (plugin.getZoneManager().getZone(zoneId) == null) {
+            dev.hytalezombie.model.MapZone newZone =
+                new dev.hytalezombie.model.MapZone(zoneId, zoneId, 1000);
+            plugin.getZoneManager().registerZone(newZone);
+            ctx.sendMessage(Message.raw("[HytaleZombie] Auto-created zone '" + zoneId
+                + "' (spawn points can create zones automatically)."));
+        }
+
         Vector3f position = new Vector3f(x, y, z);
         SpawnNode node = new SpawnNode(zoneId, position, radius);
 
