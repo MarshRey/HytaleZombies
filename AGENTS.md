@@ -630,16 +630,17 @@ src/main/java/dev/hytalezombie/
 **How it works:**
 1. **Zone registration**: `/hz addzone <zoneId> <displayName> [cost]` registers a new zone in `ZoneManager`
 2. **Zone connectivity**: `/hz connectzone <zoneA> <zoneB>` creates a bidirectional connection
-3. **Door placement**: `/hz setdoor <zoneA> <zoneB> <x> <y> <z>` sets the world-space door position
-4. **Automatic tracking**: As players move, their position is checked against door positions in their current zone. When within 2.5 blocks of a door, they transition to the connected zone.
+3. **Door placement**: `/hz setdoor <zoneA> <zoneB> <x> <y> <z> [width] [height]` sets a rectangular door area (axis-aligned box). Defaults to 1×3×1 blocks.
+4. **Automatic tracking**: As players move, their position is checked against door areas. When their position enters a door's bounding box, they transition to the connected zone.
 5. **Spawn occupancy**: `SpawnManager.occupiedZones` is automatically synced — zombies only spawn in zones with active players.
 
 **Key files:**
-- `MapZone.java` — Added `doorPositions` map, `checkDoorCrossing()` distance check, `DOOR_CROSSING_RADIUS = 2.5f`
-- `ZoneManager.java` — Added `setDoorPosition()`, `checkDoorCrossing()`, `findPlayerZone()`, `getDoorPosition()`
+- `DoorArea.java` — New record: axis-aligned bounding box door (center + width/height/depth), `contains()` AABB check
+- `MapZone.java` — Added `doorAreas: Map<String, DoorArea>`, `checkDoorCrossing()` checks AABB containment
+- `ZoneManager.java` — Added `setDoorArea()` with configurable width/height, `checkDoorCrossing()`, `findPlayerZone()`
 - `GameSession.java` — Added `ZoneManager` field, `playerZoneIds` map, `updateZoneOccupancy()`, `handleZoneTransition()`
 - `HytaleZombiePlugin.java` — Creates `ZoneManager("spawn_room")`, wires into `GameSession`
-- `HytaleZombieCommand.java` — Added `/hz addzone`, `/hz connectzone`, `/hz setdoor` commands
+- `HytaleZombieCommand.java` — Added `/hz addzone`, `/hz connectzone`, `/hz setdoor` (with optional width/height)
 
 ---
 

@@ -241,7 +241,7 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("Zones:"));
         ctx.sendMessage(Message.raw("  /hz addzone <zone> <name> [cost]      - Register a new zone"));
         ctx.sendMessage(Message.raw("  /hz connectzone <zoneA> <zoneB>       - Connect two zones"));
-        ctx.sendMessage(Message.raw("  /hz setdoor <zoneA> <zoneB> <x> <y> <z> - Place door between zones"));
+        ctx.sendMessage(Message.raw("  /hz setdoor <zoneA> <zoneB> <x> <y> <z> [w] [h] - Place door area between zones"));
         ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
         ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
         ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones with spawns"));
@@ -559,19 +559,24 @@ public class HytaleZombieCommand extends AbstractCommand {
     }
 
     /**
-     * /hz setdoor <zoneA> <zoneB> <x> <y> <z>
+     * /hz setdoor <zoneA> <zoneB> <x> <y> <z> [width] [height]
      *
-     * Sets the world-space position of a door between two connected zones.
-     * When a player walks within 2.5 blocks of this position, they transition
+     * Sets a door area (axis-aligned box) between two connected zones.
+     * When a player's position enters this area, they transition
      * between zones automatically.
+     *
+     * <p>Default door size is 1 wide × 3 tall × 1 deep (matching a standard
+     * Hytale doorway). Use [width] and [height] for larger openings like
+     * double-doors or archways.</p>
      *
      * <p>Both zones must already be connected via /hz connectzone.</p>
      */
     private void handleSetDoor(CommandContext ctx, String[] args) {
         if (args.length < 6) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setdoor <zoneA> <zoneB> <x> <y> <z>"));
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setdoor <zoneA> <zoneB> <x> <y> <z> [width] [height]"));
             ctx.sendMessage(Message.raw("  Example: /hz setdoor spawn_room room_2 10.5 64 -5.0"));
-            ctx.sendMessage(Message.raw("  Place the door position between the two zones. Players within 2.5 blocks will cross."));
+            ctx.sendMessage(Message.raw("  Double door: /hz setdoor spawn_room room_2 10.5 64 -5.0 2.0 3.0"));
+            ctx.sendMessage(Message.raw("  Width/height default to 1.0/3.0 blocks. Players entering the area cross zones."));
             return;
         }
 
@@ -587,17 +592,36 @@ public class HytaleZombieCommand extends AbstractCommand {
             return;
         }
 
+        float width = dev.hytalezombie.model.DoorArea.DEFAULT_WIDTH;
+        float height = dev.hytalezombie.model.DoorArea.DEFAULT_HEIGHT;
+        if (args.length > 6) {
+            try {
+                width = Float.parseFloat(args[6]);
+            } catch (NumberFormatException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid width: " + args[6]));
+                return;
+            }
+        }
+        if (args.length > 7) {
+            try {
+                height = Float.parseFloat(args[7]);
+            } catch (NumberFormatException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid height: " + args[7]));
+                return;
+            }
+        }
+
         try {
-            plugin.getZoneManager().setDoorPosition(zoneA, zoneB,
-                new dev.hytalezombie.model.Vector3f(x, y, z));
+            plugin.getZoneManager().setDoorArea(zoneA, zoneB,
+                new dev.hytalezombie.model.Vector3f(x, y, z), width, height);
         } catch (IllegalArgumentException e) {
             ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
             return;
         }
 
-        ctx.sendMessage(Message.raw("[HytaleZombie] Door placed between '" + zoneA + "' and '"
+        ctx.sendMessage(Message.raw("[HytaleZombie] Door area placed between '" + zoneA + "' and '"
             + zoneB + "' at " + x + ", " + y + ", " + z
-            + ". Players will transition zones when they walk near this position."));
+            + " (" + width + "×" + height + "). Players entering this area will cross zones."));
     }
 
     /**

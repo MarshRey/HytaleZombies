@@ -13,21 +13,17 @@ import java.util.Set;
  * Each zone has its own set of spawn nodes, doors leading to other zones,
  * and a point cost to enter.
  *
- * <p>Doors between zones are tracked via {@link #doorPositions}, which maps
- * a connected zone ID to the world-space position of the door leading there.
- * When a player walks within {@link #DOOR_CROSSING_RADIUS} blocks of a door,
- * they transition into the connected zone.</p>
+ * <p>Doors between zones are tracked via {@link #doorAreas}, which maps
+ * a connected zone ID to a {@link DoorArea} defining the rectangular
+ * region players cross through. Door areas can be any width/height.</p>
  */
 public class MapZone {
-
-    /** How close a player must be to a door position to trigger a zone transition. */
-    public static final float DOOR_CROSSING_RADIUS = 2.5f;
 
     private final String zoneId;
     private final String displayName;
     private final int doorCost;
     private final Set<String> connectedZoneIds;
-    private final Map<String, Vector3f> doorPositions;
+    private final Map<String, DoorArea> doorAreas;
     private boolean isUnlocked;
 
     public MapZone(@Nonnull String zoneId, @Nonnull String displayName, int doorCost) {
@@ -35,7 +31,7 @@ public class MapZone {
         this.displayName = displayName;
         this.doorCost = doorCost;
         this.connectedZoneIds = new HashSet<>();
-        this.doorPositions = new HashMap<>();
+        this.doorAreas = new HashMap<>();
         this.isUnlocked = false;
     }
 
@@ -70,60 +66,56 @@ public class MapZone {
         return Set.copyOf(connectedZoneIds);
     }
 
-    // ==================== DOOR POSITIONS ====================
+    // ==================== DOOR AREAS ====================
 
     /**
-     * Sets the world-space position of the door leading to a connected zone.
-     * Both this zone and the target zone must be connected for the door to be valid.
+     * Sets the door area leading to a connected zone.
+     * Both zones must be connected for the door to be valid.
      *
      * @param connectedZoneId the zone this door leads to
-     * @param position        the world-space position of the door
+     * @param area            the bounding box of the door
+     * @throws IllegalArgumentException if the zones are not connected
      */
-    public void setDoorPosition(@Nonnull String connectedZoneId, @Nonnull Vector3f position) {
+    public void setDoorArea(@Nonnull String connectedZoneId, @Nonnull DoorArea area) {
         if (!connectedZoneIds.contains(connectedZoneId)) {
             throw new IllegalArgumentException(
                 "Zone '" + connectedZoneId + "' is not connected to zone '" + zoneId + "'. "
                 + "Call connectZones() first.");
         }
-        doorPositions.put(connectedZoneId, position);
+        doorAreas.put(connectedZoneId, area);
     }
 
     /**
-     * Gets the world-space position of the door leading to a connected zone.
+     * Gets the door area leading to a connected zone.
      *
      * @param connectedZoneId the target zone
-     * @return the door position, or null if not set
+     * @return the door area, or null if not set
      */
     @Nullable
-    public Vector3f getDoorPosition(@Nonnull String connectedZoneId) {
-        return doorPositions.get(connectedZoneId);
+    public DoorArea getDoorArea(@Nonnull String connectedZoneId) {
+        return doorAreas.get(connectedZoneId);
     }
 
     /**
-     * Returns all door positions for this zone.
+     * Returns all door areas for this zone.
      *
-     * @return unmodifiable map of connectedZoneId → door position
+     * @return unmodifiable map of connectedZoneId → door area
      */
     @Nonnull
-    public Map<String, Vector3f> getDoorPositions() {
-        return Map.copyOf(doorPositions);
+    public Map<String, DoorArea> getDoorAreas() {
+        return Map.copyOf(doorAreas);
     }
 
     /**
-     * Checks if a world-space position is within door-crossing range
-     * of any door in this zone.
+     * Checks if a world-space position is inside any door area in this zone.
      *
      * @param position the position to check
      * @return the connected zone ID if a door was crossed, or null
      */
     @Nullable
     public String checkDoorCrossing(@Nonnull Vector3f position) {
-        for (Map.Entry<String, Vector3f> entry : doorPositions.entrySet()) {
-            float dx = position.x() - entry.getValue().x();
-            float dy = position.y() - entry.getValue().y();
-            float dz = position.z() - entry.getValue().z();
-            float distSq = dx * dx + dy * dy + dz * dz;
-            if (distSq <= DOOR_CROSSING_RADIUS * DOOR_CROSSING_RADIUS) {
+        for (Map.Entry<String, DoorArea> entry : doorAreas.entrySet()) {
+            if (entry.getValue().contains(position)) {
                 return entry.getKey();
             }
         }
@@ -131,10 +123,10 @@ public class MapZone {
     }
 
     /**
-     * Removes the door position for a connected zone.
+     * Removes the door area for a connected zone.
      */
-    public void removeDoorPosition(@Nonnull String connectedZoneId) {
-        doorPositions.remove(connectedZoneId);
+    public void removeDoorArea(@Nonnull String connectedZoneId) {
+        doorAreas.remove(connectedZoneId);
     }
 
     @Override
@@ -153,6 +145,6 @@ public class MapZone {
     @Override
     public String toString() {
         return "MapZone{id='" + zoneId + "', name='" + displayName
-            + "', cost=" + doorCost + ", doors=" + doorPositions.size() + "}";
+            + "', cost=" + doorCost + ", doors=" + doorAreas.size() + "}";
     }
 }
