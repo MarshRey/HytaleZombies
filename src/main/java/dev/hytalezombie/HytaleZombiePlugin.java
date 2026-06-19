@@ -43,6 +43,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
     private PlayerDataManager playerDataManager;
     private BarrierManager barrierManager;
     private SpawnManager spawnManager;
+    private ZoneManager zoneManager;
     private DebugManager debugManager;
     private ScoreboardManager scoreboardManager;
 
@@ -87,6 +88,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
         this.playerDataManager = new PlayerDataManager();
         this.barrierManager = new BarrierManager();
         this.spawnManager = new SpawnManager();
+        this.zoneManager = new ZoneManager("spawn_room");
         this.debugManager = new DebugManager();
 
         // Initialize the game session orchestrator
@@ -97,6 +99,9 @@ public class HytaleZombiePlugin extends JavaPlugin {
             barrierManager,
             spawnManager
         );
+
+        // Wire ZoneManager into GameSession for door-crossing zone tracking
+        this.gameSession.setZoneManager(zoneManager);
 
         // Initialize the scoreboard manager for HUD updates
         this.scoreboardManager = new ScoreboardManager(gameSession, playerDataManager);
@@ -178,6 +183,8 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 playerEntityRefs.put(playerId, event.getPlayerRef());
                 // Also forward to GameSession for NPC blackboard target assignment
                 gameSession.updatePlayerEntityRef(playerId, event.getPlayerRef());
+                // Initialize player zone — assign to starting zone
+                gameSession.getPlayerZone(playerId); // triggers lazy init via getPlayerZone()
                 // Send welcome message using PlayerRef from the store
                 com.hypixel.hytale.server.core.universe.PlayerRef playerRef = 
                     event.getPlayerRef().getStore()
@@ -355,6 +362,10 @@ public class HytaleZombiePlugin extends JavaPlugin {
      *
      * <p>Map import is handled by the SchematicImporter mod.
      * Place .schematic/.litematic files on the server and use the mod's commands.</p>
+     *
+     * <p>The spawn_room zone is already registered in ZoneManager from preLoad().
+     * Additional zones can be added via /hz addzone and connected via /hz connectzone.
+     * Door positions are set via /hz setdoor.</p>
      */
     public void setupDefaultMap() {
         // Only set up defaults on first run (no spawn nodes registered yet).
@@ -367,11 +378,14 @@ public class HytaleZombiePlugin extends JavaPlugin {
             return;
         }
 
+        // The spawn_room zone is already registered in ZoneManager from preLoad().
+        // Mark it as occupied so zombies can spawn there.
         spawnManager.markZoneOccupied("spawn_room");
         saveSpawnData();
 
         getLogger().at(Level.INFO).log(
-            "Default map zone 'spawn_room' marked. Use /hz setspawn to place spawn points."
+            "Default map zone 'spawn_room' marked. Use /hz setspawn to place spawn points, "
+            + "/hz addzone to add zones, /hz connectzone to connect them, and /hz setdoor to place doors."
         );
     }
 
@@ -414,6 +428,10 @@ public class HytaleZombiePlugin extends JavaPlugin {
 
     public SpawnManager getSpawnManager() {
         return spawnManager;
+    }
+
+    public ZoneManager getZoneManager() {
+        return zoneManager;
     }
 
     public DebugManager getDebugManager() {

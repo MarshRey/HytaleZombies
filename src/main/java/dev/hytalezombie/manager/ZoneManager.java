@@ -1,6 +1,7 @@
 package dev.hytalezombie.manager;
 
 import dev.hytalezombie.model.MapZone;
+import dev.hytalezombie.model.Vector3f;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -10,8 +11,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Manages all map zones, their connectivity, and door states.
+ * Manages all map zones, their connectivity, door states, and door positions.
  * Zones represent areas of the map that can be locked/unlocked.
+ *
+ * <p>Doors between zones have world-space positions for player crossing detection.
+ * When a player walks near a door position, they transition into the connected zone.
+ * Zone occupancy is tracked automatically based on which zones players are in.</p>
  */
 public class ZoneManager {
 
@@ -137,6 +142,107 @@ public class ZoneManager {
         return startingZoneId;
     }
 
+    // ==================== DOOR POSITION MANAGEMENT ====================
+
+    /**
+     * Sets the world-space position of a door connecting two zones.
+     * The door position is stored on both zones for bidirectional crossing detection.
+     *
+     * @param zoneIdA  the first zone
+     * @param zoneIdB  the second zone
+     * @param position the world-space position of the door between them
+     * @throws IllegalArgumentException if the zones are not connected
+     */
+    public void setDoorPosition(@Nonnull String zoneIdA, @Nonnull String zoneIdB,
+                                @Nonnull Vector3f position) {
+        MapZone zoneA = zones.get(zoneIdA);
+        MapZone zoneB = zones.get(zoneIdB);
+
+        if (zoneA == null) {
+            throw new IllegalArgumentException("Zone not found: " + zoneIdA);
+        }
+        if (zoneB == null) {
+            throw new IllegalArgumentException("Zone not found: " + zoneIdB);
+        }
+        if (!zoneA.getConnectedZoneIds().contains(zoneIdB)) {
+            throw new IllegalArgumentException(
+                "Zones '" + zoneIdA + "' and '" + zoneIdB + "' are not connected. "
+                + "Call connectZones() first.");
+        }
+
+        zoneA.setDoorPosition(zoneIdB, position);
+        zoneB.setDoorPosition(zoneIdA, position);
+        LOGGER.log(Level.INFO, "Door position set: {0} <-> {1} at {2}",
+                new Object[]{zoneIdA, zoneIdB, position});
+    }
+
+    /**
+     * Gets the door position between two connected zones.
+     *
+     * @param zoneIdA the zone the player is currently in
+     * @param zoneIdB the connected zone
+     * @return the door position, or null if not set
+     */
+    @Nullable
+    public Vector3f getDoorPosition(@Nonnull String zoneIdA, @Nonnull String zoneIdB) {
+        MapZone zone = zones.get(zoneIdA);
+        return zone != null ? zone.getDoorPosition(zoneIdB) : null;
+    }
+
+    /**
+     * Checks if a player's position is near a door in their current zone,
+     * and returns the zone they would transition into.
+     *
+     * @param currentZoneId the zone the player is currently in
+     * @param playerPosition the player's world-space position
+     * @return the ID of the zone the player is crossing into, or null if no door crossed
+     */
+    @Nullable
+    public String checkDoorCrossing(@Nonnull String currentZoneId, @Nonnull Vector3f playerPosition) {
+        MapZone currentZone = zones.get(currentZoneId);
+        if (currentZone == null) return null;
+
+        String targetZoneId = currentZone.checkDoorCrossing(playerPosition);
+        if (targetZoneId != null) {
+            MapZone targetZone = zones.get(targetZoneId);
+            if (targetZone != null && targetZone.isUnlocked()) {
+                return targetZoneId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds which zone a player is in based on their position relative to door positions.
+     * This is used for initial zone assignment when a player joins.
+     *
+     * <p>Strategy: check all door positions across all zones. If the player is near
+     * a door, they're in the zone on the "inside" side. If they're not near any door,
+     * they default to the starting zone.</p>
+     *
+     * @param position the player's position
+     * @return the zone ID the player is most likely in
+     */
+    @Nonnull
+    public String findPlayerZone(@Nonnull Vector3f position) {
+        // Check all zones for door proximity — if the player is near a door,
+        // they just entered through it and are in that zone
+        for (MapZone zone : zones.values()) {
+            String crossedZone = zone.checkDoorCrossing(position);
+            if (crossedZone != null) {
+                // Player is near a door from this zone to crossedZone —
+                // they're in crossedZone if it's unlocked, otherwise in this zone
+                MapZone target = zones.get(crossedZone);
+                if (target != null && target.isUnlocked()) {
+                    return crossedZone;
+                }
+                return zone.getZoneId();
+            }
+        }
+        // Default to starting zone
+        return startingZoneId;
+    }
+
     /**
      * Checks if a path exists from unlocked zones to a target zone
      * traversing only through unlocked zones.
@@ -159,7 +265,6 @@ public class ZoneManager {
             String current = queue.poll();
             if (current.equals(targetZoneId)) return true;
 
-            // Check if target is directly the current zone
             MapZone currentZone = zones.get(current);
             if (currentZone != null) {
                 for (String neighbor : currentZone.getConnectedZoneIds()) {

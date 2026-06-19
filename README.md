@@ -170,6 +170,9 @@ Map import is handled by the **SchematicImporter** mod (`run/mods/SchematicImpor
 | `/hz delspawn <zone> [index]` | Removes spawn points from a zone (or specific index) |
 | `/hz listspawns [zone]` | Lists all registered spawn points |
 | `/hz clearspawns` | Removes all spawn points |
+| `/hz addzone <id> <name> [cost]` | Registers a new zone |
+| `/hz connectzone <A> <B>` | Connects two zones |
+| `/hz setdoor <A> <B> <x> <y> <z>` | Places a door between connected zones |
 | `/hz markzone <zone>` | Marks a zone as occupied (zombies will spawn there) |
 | `/hz unmarkzone <zone>` | Unmarks a zone |
 | `/hz listzones` | Lists all zones with spawns |
@@ -200,7 +203,8 @@ Requires the `hytalezombie.admin` permission.
 | 12 Perks | Done | Juggernog, Speed Cola, Quick Revive, etc. |
 | 7 Power-ups | Done | All classic zombie power-ups implemented |
 | Barriers | Done | Repair mechanics for window barriers |
-| Map zones | Done | Zone connectivity + door unlocking |
+| Map zones | Done | Zone connectivity, door unlocking, door-crossing player tracking |
+| Zone auto-occupancy | Done | SpawnManager automatically tracks which zones have players; zombies only spawn in occupied zones |
 | Map prefabs | Done | Import Minecraft builds via official Hytale Converter → .prefab → in-game Prefab Tool |
 | 245+ tests | Done | Unit tests for all core systems |
 
@@ -277,17 +281,17 @@ src/
         BarrierManager.java         # Window barrier CRUD
         DebugManager.java           # Debug mode + in-world visualization
         GameManagerProvider.java    # Manager access interface
-        GameSession.java            # MAIN ORCHESTRATOR (tick, spawn, damage, economy, AI)
+        GameSession.java            # MAIN ORCHESTRATOR (tick, spawn, damage, economy, AI, zone tracking)
         ScoreboardManager.java      # Player tracking + HUD state bridge
         PlayerDataManager.java      # Per-player state
         RoundManager.java           # Round tracking + scaling math
         WeaponRegistry.java         # Weapon definitions
-        ZoneManager.java            # Map zone connectivity + doors
+        ZoneManager.java            # Map zone connectivity, door positions, door-crossing detection
       ui/
         ZombieHud.java              # Custom HUD overlay (CustomUIHud API)
       model/
         Barrier.java                # Barrier state machine
-        MapZone.java                # Named zone with door cost
+        MapZone.java                # Named zone with door cost + door positions
         Perk.java                   # 12 perk definitions
         PlayerData.java             # Points, kills, downs, alive
         PowerUp.java                # Power-up types + durations

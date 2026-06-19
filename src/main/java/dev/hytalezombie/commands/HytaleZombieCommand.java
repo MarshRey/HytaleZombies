@@ -183,6 +183,18 @@ public class HytaleZombieCommand extends AbstractCommand {
                 break;
 
             // ===== Zone Management =====
+            case "addzone":
+                handleAddZone(ctx, args);
+                break;
+
+            case "connectzone":
+                handleConnectZone(ctx, args);
+                break;
+
+            case "setdoor":
+                handleSetDoor(ctx, args);
+                break;
+
             case "markzone":
                 handleMarkZone(ctx, args);
                 break;
@@ -227,6 +239,9 @@ public class HytaleZombieCommand extends AbstractCommand {
         ctx.sendMessage(Message.raw("  /hz zombieinfo                        - List all zombie stats"));
         ctx.sendMessage(Message.raw("  /hz spawninfo                         - Spawn progress this round"));
         ctx.sendMessage(Message.raw("Zones:"));
+        ctx.sendMessage(Message.raw("  /hz addzone <zone> <name> [cost]      - Register a new zone"));
+        ctx.sendMessage(Message.raw("  /hz connectzone <zoneA> <zoneB>       - Connect two zones"));
+        ctx.sendMessage(Message.raw("  /hz setdoor <zoneA> <zoneB> <x> <y> <z> - Place door between zones"));
         ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
         ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
         ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones with spawns"));
@@ -490,6 +505,100 @@ public class HytaleZombieCommand extends AbstractCommand {
     // ========================================================================
     //  ZONE COMMANDS
     // ========================================================================
+
+    /**
+     * /hz addzone <zoneId> <displayName> [doorCost]
+     *
+     * Registers a new zone in the map. Zones must be connected via /hz connectzone
+     * before they can be accessed, and door positions must be set via /hz setdoor
+     * for automatic zone tracking.
+     */
+    private void handleAddZone(CommandContext ctx, String[] args) {
+        if (args.length < 3) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz addzone <zoneId> <displayName> [doorCost]"));
+            ctx.sendMessage(Message.raw("  Example: /hz addzone room_2 \"Room 2\" 1500"));
+            return;
+        }
+
+        String zoneId = args[1];
+        String displayName = args[2];
+        int doorCost = 1000; // default
+        if (args.length > 3) {
+            try {
+                doorCost = Integer.parseInt(args[3]);
+            } catch (NumberFormatException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid door cost: " + args[3]));
+                return;
+            }
+        }
+
+        dev.hytalezombie.model.MapZone zone = new dev.hytalezombie.model.MapZone(zoneId, displayName, doorCost);
+        plugin.getZoneManager().registerZone(zone);
+        ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' (" + displayName
+            + ") registered. Cost to unlock: " + doorCost + " points."));
+    }
+
+    /**
+     * /hz connectzone <zoneA> <zoneB>
+     *
+     * Connects two zones bidirectionally. Doors between them are placed
+     * via /hz setdoor.
+     */
+    private void handleConnectZone(CommandContext ctx, String[] args) {
+        if (args.length < 3) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz connectzone <zoneA> <zoneB>"));
+            ctx.sendMessage(Message.raw("  Example: /hz connectzone spawn_room room_2"));
+            return;
+        }
+
+        String zoneA = args[1];
+        String zoneB = args[2];
+        plugin.getZoneManager().connectZones(zoneA, zoneB);
+        ctx.sendMessage(Message.raw("[HytaleZombie] Zones '" + zoneA + "' and '" + zoneB
+            + "' connected. Use /hz setdoor to place the door between them."));
+    }
+
+    /**
+     * /hz setdoor <zoneA> <zoneB> <x> <y> <z>
+     *
+     * Sets the world-space position of a door between two connected zones.
+     * When a player walks within 2.5 blocks of this position, they transition
+     * between zones automatically.
+     *
+     * <p>Both zones must already be connected via /hz connectzone.</p>
+     */
+    private void handleSetDoor(CommandContext ctx, String[] args) {
+        if (args.length < 6) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setdoor <zoneA> <zoneB> <x> <y> <z>"));
+            ctx.sendMessage(Message.raw("  Example: /hz setdoor spawn_room room_2 10.5 64 -5.0"));
+            ctx.sendMessage(Message.raw("  Place the door position between the two zones. Players within 2.5 blocks will cross."));
+            return;
+        }
+
+        String zoneA = args[1];
+        String zoneB = args[2];
+        float x, y, z;
+        try {
+            x = Float.parseFloat(args[3]);
+            y = Float.parseFloat(args[4]);
+            z = Float.parseFloat(args[5]);
+        } catch (NumberFormatException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use numbers for x, y, z."));
+            return;
+        }
+
+        try {
+            plugin.getZoneManager().setDoorPosition(zoneA, zoneB,
+                new dev.hytalezombie.model.Vector3f(x, y, z));
+        } catch (IllegalArgumentException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
+            return;
+        }
+
+        ctx.sendMessage(Message.raw("[HytaleZombie] Door placed between '" + zoneA + "' and '"
+            + zoneB + "' at " + x + ", " + y + ", " + z
+            + ". Players will transition zones when they walk near this position."));
+    }
 
     /**
      * /hz markzone <zone>

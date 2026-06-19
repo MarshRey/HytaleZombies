@@ -36,6 +36,7 @@ public class GameSession {
     private final PlayerDataManager playerDataManager;
     private final BarrierManager barrierManager;
     private final SpawnManager spawnManager;
+    private ZoneManager zoneManager;
 
     // Game state
     private boolean sessionActive;
@@ -66,6 +67,9 @@ public class GameSession {
     private final Map<String, Vector3f> playerPositions;
     // Player entity refs for NPC blackboard target assignment
     private final Map<String, Ref<EntityStore>> playerEntityRefs;
+
+    // Player zone tracking (playerId -> zoneId)
+    private final Map<String, String> playerZoneIds;
 
     /**
      * Logical representation of a zombie in the game.
@@ -174,6 +178,8 @@ public class GameSession {
         this.uuidToZombieId = new ConcurrentHashMap<>();
         this.playerPositions = new ConcurrentHashMap<>();
         this.playerEntityRefs = new ConcurrentHashMap<>();
+        this.playerZoneIds = new ConcurrentHashMap<>();
+        this.zoneManager = null; // Set by HytaleZombiePlugin after construction
     }
 
     // ==================== MATCH LIFECYCLE ====================
@@ -799,19 +805,134 @@ public class GameSession {
     // ==================== HYTALE SDK INTEGRATION ====================
 
     /**
-     * Updates a player's position for zombie AI targeting.
+     * Updates a player's position for zombie AI targeting and zone tracking.
      * Called periodically from the plugin's game loop.
+     *
+     * <p>Also checks for door-crossing events: if the player walks near a door
+     * in their current zone, they transition into the connected zone and
+     * SpawnManager occupancy is updated automatically.</p>
      */
     public void updatePlayerPosition(@Nonnull String playerId, @Nonnull Vector3f position) {
         playerPositions.put(playerId, position);
+
+        // Check for door-crossing zone transitions
+        if (zoneManager != null) {
+            String currentZone = playerZoneIds.get(playerId);
+            if (currentZone != null) {
+                String newZone = zoneManager.checkDoorCrossing(currentZone, position);
+                if (newZone != null && !newZone.equals(currentZone)) {
+                    handleZoneTransition(playerId, currentZone, newZone, position);
+                }
+            } else {
+                // First position update — assign initial zone
+                String initialZone = zoneManager.findPlayerZone(position);
+                setPlayerZone(playerId, initialZone);
+            }
+        }
     }
 
     /**
-     * Removes a player's tracked position when they disconnect.
+     * Handles a player moving from one zone to another through a door.
+     * Updates zone tracking and re-syncs SpawnManager occupancy.
+     */
+    private void handleZoneTransition(@Nonnull String playerId,
+                                      @Nonnull String fromZone,
+                                      @Nonnull String toZone,
+                                      @Nonnull Vector3f position) {
+        setPlayerZone(playerId, toZone);
+        LOGGER.log(Level.INFO, "Player {0} moved from zone '{1}' to zone '{2}' at {3}",
+                new Object[]{playerId, fromZone, toZone, position});
+    }
+
+    /**
+     * Sets a player's current zone and updates zone occupancy.
+     * If the old zone becomes empty, it is marked unoccupied in SpawnManager.
+     * The new zone is marked occupied.
+     */
+    private void setPlayerZone(@Nonnull String playerId, @Nonnull String zoneId) {
+        String oldZone = playerZoneIds.put(playerId, zoneId);
+        // Only update occupancy if the zone actually changed
+        if (!zoneId.equals(oldZone)) {
+            updateZoneOccupancy(zoneId, oldZone);
+        }
+    }
+
+    /**
+     * Gets the zone a player is currently in.
+     *
+     * @param playerId the player's ID
+     * @return the zone ID, or the starting zone if not yet tracked
+     */
+    @Nonnull
+    public String getPlayerZone(@Nonnull String playerId) {
+        String zone = playerZoneIds.get(playerId);
+        if (zone != null) return zone;
+        // Fall back to starting zone
+        if (zoneManager != null) {
+            return zoneManager.getStartingZoneId();
+        }
+        return "spawn_room";
+    }
+
+    /**
+     * Recalculates SpawnManager occupied zones from all tracked player positions.
+     * After a zone transition, this ensures only zones with active players are occupied.
+     */
+    private void updateZoneOccupancy(@Nonnull String newZone, @Nullable String oldZone) {
+        // Build a set of all zones currently occupied by players
+        java.util.Set<String> currentOccupied = new java.util.HashSet<>();
+        for (String zone : playerZoneIds.values()) {
+            if (zone != null) {
+                currentOccupied.add(zone);
+            }
+        }
+
+        // Mark new zone as occupied (in case it wasn't already)
+        if (!currentOccupied.contains(newZone)) {
+            currentOccupied.add(newZone);
+        }
+
+        // Sync with SpawnManager — mark zones that HAVE players
+        for (String zone : currentOccupied) {
+            spawnManager.markZoneOccupied(zone);
+        }
+
+        // If the old zone is now empty, unmark it
+        if (oldZone != null && !currentOccupied.contains(oldZone)) {
+            spawnManager.markZoneUnoccupied(oldZone);
+        }
+
+        LOGGER.log(Level.FINE, "Zone occupancy updated: occupied={0}, spawnManager.occupied={1}",
+                new Object[]{currentOccupied, spawnManager.getOccupiedZones()});
+    }
+
+    /**
+     * Sets the ZoneManager reference for door-crossing zone tracking.
+     * Called by HytaleZombiePlugin after construction.
+     */
+    public void setZoneManager(@Nullable ZoneManager zoneManager) {
+        this.zoneManager = zoneManager;
+    }
+
+    /**
+     * Gets the ZoneManager, or null if not yet set.
+     */
+    @Nullable
+    public ZoneManager getZoneManager() {
+        return zoneManager;
+    }
+
+    /**
+     * Removes a player's tracked position and zone when they disconnect.
      */
     public void removePlayerPosition(@Nonnull String playerId) {
         playerPositions.remove(playerId);
         playerEntityRefs.remove(playerId);
+        // Clean up zone tracking and re-sync occupancy
+        String oldZone = playerZoneIds.remove(playerId);
+        if (oldZone != null) {
+            updateZoneOccupancy(null, oldZone);
+        }
     }
 
     /**

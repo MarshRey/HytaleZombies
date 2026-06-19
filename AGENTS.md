@@ -311,6 +311,8 @@ All spawning logic can be tested through the existing unit tests. Run:
 | 7 power-up types | ? | `PowerUp.java` |
 | Weapon registry with wall + mystery box | ? | `WeaponRegistry.java` |
 | 138 unit tests (all passing) | ? | `src/test/` |
+| Door-crossing zone tracking | ? | `ZoneManager.java`, `MapZone.java`, `GameSession.java` |
+| Automatic spawn zone occupancy from player positions | ? | `GameSession.playerZoneIds`, `SpawnManager.occupiedZones` |
 
 ## ? Hytale SDK Integration (Entity System ? Complete)
 
@@ -558,14 +560,14 @@ src/main/java/dev/hytalezombie/
 ?   ??? BarrierManager.java             # CRUD for window barriers
 ?   ??? DebugManager.java               # Debug mode + spawn node visualization
 ?   ??? GameManagerProvider.java        # Interface for accessing all managers
-?   ??? GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy)
+?   ??? GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy, zone tracking)
 ?   ??? PlayerDataManager.java          # Per-player state management
 ?   ??? RoundManager.java               # Round tracking + scaling calculations
 ?   ??? WeaponRegistry.java             # All weapon definitions
-?   ??? ZoneManager.java                # Map zone connectivity + door unlocking
+?   ??? ZoneManager.java                # Map zone connectivity, door positions, door-crossing detection
 ??? model/
 ?   ??? Barrier.java                    # Barrier state machine (INTACT?DAMAGED?BROKEN)
-?   ??? MapZone.java                    # Named zone with door cost
+?   ??? MapZone.java                    # Named zone with door cost + door positions
 ?   ??? Perk.java                       # Perk-a-Cola definitions (12 perks)
 ?   ??? PlayerData.java                 # Points, kills, downs, alive
 ?   ??? PowerUp.java                    # Power-up types + timed duration
@@ -621,6 +623,23 @@ src/main/java/dev/hytalezombie/
 **Fix 3**: Set `DropList: "Empty"` in role JSON.
 
 **Feature**: Added `tickZombieAI()` cleanup for zombies whose entity refs become invalid (despawned by NPC system).
+
+### ✅ Phase 6: Door-Crossing Zone Tracking
+**Feature**: Automatic zone occupancy tracking via door-crossing detection. Players are assigned to zones based on their world position and transition between zones by walking near defined door positions.
+
+**How it works:**
+1. **Zone registration**: `/hz addzone <zoneId> <displayName> [cost]` registers a new zone in `ZoneManager`
+2. **Zone connectivity**: `/hz connectzone <zoneA> <zoneB>` creates a bidirectional connection
+3. **Door placement**: `/hz setdoor <zoneA> <zoneB> <x> <y> <z>` sets the world-space door position
+4. **Automatic tracking**: As players move, their position is checked against door positions in their current zone. When within 2.5 blocks of a door, they transition to the connected zone.
+5. **Spawn occupancy**: `SpawnManager.occupiedZones` is automatically synced — zombies only spawn in zones with active players.
+
+**Key files:**
+- `MapZone.java` — Added `doorPositions` map, `checkDoorCrossing()` distance check, `DOOR_CROSSING_RADIUS = 2.5f`
+- `ZoneManager.java` — Added `setDoorPosition()`, `checkDoorCrossing()`, `findPlayerZone()`, `getDoorPosition()`
+- `GameSession.java` — Added `ZoneManager` field, `playerZoneIds` map, `updateZoneOccupancy()`, `handleZoneTransition()`
+- `HytaleZombiePlugin.java` — Creates `ZoneManager("spawn_room")`, wires into `GameSession`
+- `HytaleZombieCommand.java` — Added `/hz addzone`, `/hz connectzone`, `/hz setdoor` commands
 
 ---
 
