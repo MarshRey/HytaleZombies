@@ -22,6 +22,13 @@ Group {
       Anchor: (Top: 6);
     }
 
+    // Zone indicator
+    Label #ZoneLabel {
+      Style: (...$C.@DefaultLabelStyle, FontSize: 14, TextColor: #88AAEE);
+      Text: "Zone: spawn_room";
+      Anchor: (Top: 6);
+    }
+
     // Points display
     Label #PointsLabel {
       Style: (...$C.@DefaultLabelStyle, FontSize: 16, TextColor: #7acc7a);

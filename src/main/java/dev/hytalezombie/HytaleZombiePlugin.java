@@ -348,7 +348,8 @@ public class HytaleZombiePlugin extends JavaPlugin {
                 if (data != null) {
                     points = data.getPoints();
                 }
-                hud.updateDisplay(round, activeZombies, totalZombies, points);
+                String zoneName = gameSession.getPlayerZone(playerId);
+                hud.updateDisplay(round, activeZombies, totalZombies, points, zoneName);
             } catch (Exception e) {
                 getLogger().at(Level.FINE).log("Failed to update HUD for player {0}: {1}",
                     playerId, e.getMessage());

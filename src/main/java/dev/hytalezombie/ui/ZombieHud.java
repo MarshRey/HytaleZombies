@@ -31,6 +31,7 @@ public class ZombieHud extends CustomUIHud {
     private int lastActiveZombies = -1;
     private int lastTotalZombies = -1;
     private int lastPoints = -1;
+    private String lastZone = "";
 
     /**
      * @param playerRef the PlayerRef for the player this HUD belongs to
@@ -51,6 +52,7 @@ public class ZombieHud extends CustomUIHud {
         lastActiveZombies = -1;
         lastTotalZombies = -1;
         lastPoints = -1;
+        lastZone = "";
     }
 
     /**
@@ -61,8 +63,10 @@ public class ZombieHud extends CustomUIHud {
      * @param activeZombies  number of alive zombies
      * @param totalZombies   total zombies to spawn this round
      * @param points         player's current points
+     * @param zoneName       the zone the player is currently in
      */
-    public void updateDisplay(int round, int activeZombies, int totalZombies, int points) {
+    public void updateDisplay(int round, int activeZombies, int totalZombies, int points,
+                              @Nonnull String zoneName) {
         UICommandBuilder cmd = new UICommandBuilder();
         boolean changed = false;
 
@@ -82,6 +86,12 @@ public class ZombieHud extends CustomUIHud {
         if (points != lastPoints) {
             cmd.set("#PointsLabel.Text", "Points: " + points);
             lastPoints = points;
+            changed = true;
+        }
+
+        if (!zoneName.equals(lastZone)) {
+            cmd.set("#ZoneLabel.Text", "Zone: " + zoneName);
+            lastZone = zoneName;
             changed = true;
         }
 
