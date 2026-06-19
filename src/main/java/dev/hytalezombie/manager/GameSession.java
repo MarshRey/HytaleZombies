@@ -212,14 +212,43 @@ public class GameSession {
 
     /**
      * Ends the current match.
+     * Removes all active zombie entities from the world and resets game state.
      */
     public void endMatch() {
         if (!sessionActive) return;
         sessionActive = false;
+
+        // Remove all zombie entities from the world before clearing state
+        if (world != null && !activeZombies.isEmpty()) {
+            java.util.List<Ref<EntityStore>> refsToRemove = new java.util.ArrayList<>();
+            for (ZombieInstance zombie : activeZombies.values()) {
+                zombie.getEntityRef().ifPresent(ref -> {
+                    if (ref.isValid()) refsToRemove.add(ref);
+                });
+                if (zombie.getEntityUuid() != null) {
+                    uuidToZombieId.remove(zombie.getEntityUuid());
+                }
+                if (zombie.getNetworkId() >= 0) {
+                    networkIdToZombieId.remove(zombie.getNetworkId());
+                }
+            }
+            if (!refsToRemove.isEmpty()) {
+                world.execute(() -> {
+                    com.hypixel.hytale.component.Store<EntityStore> store =
+                        world.getEntityStore().getStore();
+                    for (Ref<EntityStore> ref : refsToRemove) {
+                        if (ref.isValid()) {
+                            store.removeEntity(ref, RemoveReason.REMOVE);
+                        }
+                    }
+                });
+            }
+        }
+
         roundManager.endMatch();
         activeZombies.clear();
         activePowerUps.clear();
-        LOGGER.log(Level.INFO, "Game session ended.");
+        LOGGER.log(Level.INFO, "Game session ended. All zombies removed.");
     }
 
     /**
