@@ -2,7 +2,7 @@
 
 A round-based wave survival game mode for Hytale, inspired by Call of Duty Zombies. Players survive waves of increasingly difficult zombies, earn points, purchase weapons/upgrades, repair barriers, and unlock new areas of the map.
 
-The **core game logic is fully implemented** with **245+ passing unit tests**. The spawning system, round progression, economy, power-ups, barriers, and map zones are all coded and tested.
+The **core game logic is fully implemented** with **259 passing unit tests**. The spawning system, round progression, economy, power-ups, barriers, and map zones are all coded and tested.
 
 ---
 
@@ -126,20 +126,54 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 
 ## Game Commands (In-Game)
 
+All commands use `/hz <subcommand>` (or `/hytalezombie` / `/zombie`).
+
 ### Match Controls
-| Command | Aliases | What It Does |
-|---------|---------|-------------|
-| `/hytalezombie start` | `/hz start`, `/zombie start` | Starts a match, marks spawn_room zone, begins round 1 |
-| `/hytalezombie stop` | `/hz stop`, `/zombie stop` | Ends the current match |
-| `/hytalezombie round [n]` | `/hz round [n]` | Shows or sets the current round number |
-| `/hytalezombie info` | `/hz info` | Shows match status, round, active zombies, player count |
-| `/hz state` | – | Full state dump (match, round, zombies, power-ups, config) |
-| `/hz nextround` | – | Force-advance to next round (kills remaining zombies) |
+| Command | What It Does |
+|---------|-------------|
+| `/hz start` | Starts a match, marks spawn_room zone, begins round 1 |
+| `/hz stop` | Ends the current match |
+| `/hz round [n]` | Shows or sets the current round number |
+| `/hz nextround` | Force-advance to next round (kills remaining zombies) |
+| `/hz info` | Shows match status, round, active zombies, player count |
+| `/hz state` | Full state dump (match, round, zombies, power-ups, config) |
+| `/hz reset` | Stops match and clears all map setup data except spawn_room |
+
+### Map Setup
+| Command | What It Does |
+|---------|-------------|
+| `/hz setup` | Prints the map setup checklist and ensures spawn_room exists |
+| `/hz validate` | Checks whether the current map is playable |
+| `/hz savemap` | Forces an immediate save of the full map layout |
+| `/hz map` | Registers the default test map with spawn nodes |
+| `/hz setspawn here [radius]` | Adds a spawn point at your feet (in your current zone) |
+| `/hz setspawn <zone> <x> <y> <z> [r]` | Adds a spawn point at specific coordinates |
+| `/hz addspawn here [radius]` | Alias for `/hz setspawn here` |
+| `/hz delspawn <zone> [index]` | Removes spawn points from a zone (or specific index) |
+| `/hz listspawns [zone]` | Lists all registered spawn points |
+| `/hz clearspawns` | Removes all spawn points |
+| `/hz addzone <id> <name> [cost]` | Registers a new zone |
+| `/hz connectzone <A> <B>` | Connects two zones |
+| `/hz setdoor <A> <B> <x1> <y1> <z1> <x2> <y2> <z2>` | Places a door AABB between connected zones |
+| `/hz adddoor <A> <B> [width] [height]` | Creates a door area centered on you |
+| `/hz removezone <zone>` | Removes a zone and cleans up its connections/spawns |
+| `/hz markzone <zone>` | Marks a zone as occupied (zombies will spawn there) |
+| `/hz unmarkzone <zone>` | Unmarks a zone |
+| `/hz listzones` | Lists all zones with spawns |
+
+### Barriers
+| Command | What It Does |
+|---------|-------------|
+| `/hz barrier add <zone> [x y z]` | Adds a barrier at the target block or your feet |
+| `/hz barrier remove [x y z]` | Removes a barrier |
+| `/hz barrier list [zone]` | Lists barriers |
 
 ### Zombie Testing
 | Command | What It Does |
 |---------|-------------|
-| `/hz spawnzombie [zone] [count]` | Spawns zombie(s) manually - works even without an active match (no round tracking). Useful for testing |
+| `/hz spawnzombie <count> [zone]` | Spawns zombie(s) manually; works without an active match |
+| `/hz spawnhere` | Spawns a zombie at your position |
+| `/hz summon` | Alias for `/hz spawnhere` |
 | `/hz killall` | Kills all active zombies instantly |
 | `/hz zombieinfo` | Lists all active zombies with HP, speed, and position |
 | `/hz spawninfo` | Shows spawn progress (spawned/killed/remaining this round) |
@@ -152,6 +186,19 @@ Remove-Item -Path "run\logs\*" -Force -ErrorAction SilentlyContinue
 | `/hz giveweapon <player> <weapon_id>` | Gives a player a weapon without cost |
 | `/hz giveperk <player> <perk_type>` | Gives a player a perk without cost |
 
+### Debug Commands
+| Command | What It Does |
+|---------|-------------|
+| `/hz debug` | Toggles all debug markers (spawn points, barriers, zones) |
+| `/hz debug spawns` | Toggles spawn-point markers only |
+| `/hz debug barriers` | Toggles barrier markers only |
+| `/hz debug zones` | Toggles zone/door markers only |
+| `/hz config` | Lists all config values |
+| `/hz config <key> <value>` | Live-tweaks a config value without restart |
+| `/hz state` | Full game state dump |
+
+Requires the `hytalezombie.admin` permission.
+
 ### Map Prefabs
 
 Map import is handled by the **SchematicImporter** mod (`run/mods/SchematicImporter-1.1.0.jar`).
@@ -159,33 +206,7 @@ Map import is handled by the **SchematicImporter** mod (`run/mods/SchematicImpor
 **To import a Minecraft map:**
 1. Place your `.schematic` or `.litematic` file on the server
 2. Use the SchematicImporter mod's in-game commands to convert and place the structure
-3. Set up spawn nodes with `/hz setspawn` around the placed structure
-
-### Map Setup Commands
-| Command | What It Does |
-|---------|-------------|
-| `/hz map` | Registers the default test map with spawn nodes |
-| `/hz setspawn <zone> [radius]` | Adds a spawn point at (0,0,0) for a zone |
-| `/hz setspawn <zone> <x> <y> <z> [r]` | Adds a spawn point at specific coordinates |
-| `/hz delspawn <zone> [index]` | Removes spawn points from a zone (or specific index) |
-| `/hz listspawns [zone]` | Lists all registered spawn points |
-| `/hz clearspawns` | Removes all spawn points |
-| `/hz addzone <id> <name> [cost]` | Registers a new zone |
-| `/hz connectzone <A> <B>` | Connects two zones |
-| `/hz setdoor <A> <B> <x> <y> <z>` | Places a door between connected zones |
-| `/hz markzone <zone>` | Marks a zone as occupied (zombies will spawn there) |
-| `/hz unmarkzone <zone>` | Unmarks a zone |
-| `/hz listzones` | Lists all zones with spawns |
-
-### Debug Commands
-| Command | What It Does |
-|---------|-------------|
-| `/hz debug` | Toggles debug mode (spawn node visualization logs) |
-| `/hz config` | Lists all config values |
-| `/hz config <key> <value>` | Live-tweaks a config value without restart |
-| `/hz state` | Full game state dump |
-
-Requires the `hytalezombie.admin` permission.
+3. Set up spawn nodes, zones, doors, and barriers with `/hz` commands
 
 ---
 
@@ -206,7 +227,9 @@ Requires the `hytalezombie.admin` permission.
 | Map zones | Done | Zone connectivity, door unlocking, door-crossing player tracking |
 | Zone auto-occupancy | Done | SpawnManager automatically tracks which zones have players; zombies only spawn in occupied zones |
 | Map prefabs | Done | Import Minecraft builds via official Hytale Converter → .prefab → in-game Prefab Tool |
-| 245+ tests | Done | Unit tests for all core systems |
+| 259 tests | Done | Unit tests for all core systems |
+| Full map persistence | Done | Spawns, zones, doors, and barriers saved to JSON |
+| In-world debug markers | Done | Temporary blocks show spawn points, barriers, and zones |
 
 ---
 
@@ -287,8 +310,12 @@ src/
         RoundManager.java           # Round tracking + scaling math
         WeaponRegistry.java         # Weapon definitions
         ZoneManager.java            # Map zone connectivity, door positions, door-crossing detection
+      persistence/
+        MapDataStore.java           # Full map layout save/load (spawns, zones, doors, barriers)
       ui/
         ZombieHud.java              # Custom HUD overlay (CustomUIHud API)
+      util/
+        WorldMarkerUtil.java        # Temporary in-world debug marker blocks
       model/
         Barrier.java                # Barrier state machine
         MapZone.java                # Named zone with door cost + door positions

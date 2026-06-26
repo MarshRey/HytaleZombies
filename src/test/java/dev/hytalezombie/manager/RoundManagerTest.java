@@ -112,6 +112,34 @@ class RoundManagerTest {
         }
 
         @Test
+        @DisplayName("should set round directly")
+        void setRound() {
+            roundManager.startMatch();
+            roundManager.setRound(10);
+            assertEquals(10, roundManager.getCurrentRound());
+        }
+
+        @Test
+        @DisplayName("should ignore invalid round values")
+        void setRound_invalid() {
+            roundManager.startMatch();
+            roundManager.setRound(0);
+            assertEquals(1, roundManager.getCurrentRound());
+            roundManager.setRound(-5);
+            assertEquals(1, roundManager.getCurrentRound());
+        }
+
+        @Test
+        @DisplayName("should reset active zombie count when setting round")
+        void setRound_resetsActiveZombies() {
+            roundManager.startMatch();
+            roundManager.incrementActiveZombies();
+            roundManager.incrementActiveZombies();
+            roundManager.setRound(5);
+            assertEquals(0, roundManager.getActiveZombieCount());
+        }
+
+        @Test
         @DisplayName("should log start and end messages")
         void logging() {
             // RoundManager now logs via java.util.logging.Logger directly.

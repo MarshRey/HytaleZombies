@@ -310,7 +310,7 @@ All spawning logic can be tested through the existing unit tests. Run:
 | 12 perk types with costs | ? | `Perk.java` |
 | 7 power-up types | ? | `PowerUp.java` |
 | Weapon registry with wall + mystery box | ? | `WeaponRegistry.java` |
-| 138 unit tests (all passing) | ? | `src/test/` |
+| 259 unit tests (all passing) | ? | `src/test/` |
 | Door-crossing zone tracking | ? | `ZoneManager.java`, `MapZone.java`, `GameSession.java` |
 | Automatic spawn zone occupancy from player positions | ? | `GameSession.playerZoneIds`, `SpawnManager.occupiedZones` |
 
@@ -494,7 +494,7 @@ All five Hytale SDK integration steps are complete. When a player joins and `/hz
 3. `ZombieDamageEventSystem` forwards damage events for point tracking
 4. Entities are removed from the world on death or nuke
 
-The game loop, timing, scaling, points, and round advancement were already fully built and tested (138 unit tests).
+The game loop, timing, scaling, points, and round advancement were already fully built and tested (259 unit tests).
 
 ---
 
@@ -503,23 +503,60 @@ The game loop, timing, scaling, points, and round advancement were already fully
 ### Match Controls
 | Command | What It Does |
 |---------|-------------|
-| `/hytalezombie start` or `/hz start` | Starts a match, marks spawn_room zone, begins round 1. Use /hz setspawn to add spawn points |
-| `/hytalezombie stop` or `/hz stop` | Ends the current match |
-| `/hytalezombie round [n]` or `/hz round [n]` | Shows or sets the current round number |
-| `/hytalezombie info` or `/hz info` | Shows match status, round, active zombies, player count |
+| `/hz start` | Starts a match, marks spawn_room zone, begins round 1 |
+| `/hz stop` | Ends the current match |
+| `/hz round [n]` | Shows or sets the current round number |
+| `/hz nextround` | Force-advance to next round |
+| `/hz info` | Shows match status, round, active zombies, player count |
+| `/hz state` | Full game state dump |
+| `/hz reset` | Stops match and clears map setup except spawn_room |
 
 ### Map Setup Commands
 | Command | What It Does |
 |---------|-------------|
+| `/hz setup` | Prints the setup checklist and ensures spawn_room exists |
+| `/hz validate` | Checks whether the current map is playable |
+| `/hz savemap` | Saves the full map layout to disk |
 | `/hz map` | Registers the default test map with spawn nodes |
-| `/hz setspawn <zone> [radius]` | Adds a spawn point at (0,0,0) for a zone |
+| `/hz setspawn here [radius]` | Adds a spawn point at your feet |
 | `/hz setspawn <zone> <x> <y> <z> [r]` | Adds a spawn point at specific coordinates |
+| `/hz addspawn here [radius]` | Alias for `/hz setspawn here` |
 | `/hz delspawn <zone> [index]` | Removes spawn points from a zone |
 | `/hz listspawns [zone]` | Lists all registered spawn points |
 | `/hz clearspawns` | Removes all spawn points |
+| `/hz addzone <id> <name> [cost]` | Registers a new zone |
+| `/hz connectzone <A> <B>` | Connects two zones |
+| `/hz setdoor <A> <B> x1 y1 z1 x2 y2 z2` | Places a door AABB between connected zones |
+| `/hz adddoor <A> <B> [width] [height]` | Creates a door area centered on you |
+| `/hz removezone <zone>` | Removes a zone and cleans up connections/spawns |
 | `/hz markzone <zone>` | Marks a zone as occupied (zombies will spawn there) |
 | `/hz unmarkzone <zone>` | Unmarks a zone |
 | `/hz listzones` | Lists all zones with spawns |
+
+### Barrier Commands
+| Command | What It Does |
+|---------|-------------|
+| `/hz barrier add <zone> [x y z]` | Adds a barrier at target block or your feet |
+| `/hz barrier remove [x y z]` | Removes a barrier |
+| `/hz barrier list [zone]` | Lists barriers |
+
+### Zombie Testing
+| Command | What It Does |
+|---------|-------------|
+| `/hz spawnzombie <count> [zone]` | Spawns zombie(s) manually; works without active match |
+| `/hz spawnhere` / `/hz summon` | Spawns a zombie at your position |
+| `/hz killall` | Kills all active zombies instantly |
+| `/hz zombieinfo` | Lists all active zombies with stats |
+| `/hz spawninfo` | Shows spawn progress this round |
+
+### Debug Commands
+| Command | What It Does |
+|---------|-------------|
+| `/hz debug` | Toggles all debug markers |
+| `/hz debug spawns` | Toggles spawn-point markers |
+| `/hz debug barriers` | Toggles barrier markers |
+| `/hz debug zones` | Toggles zone/door markers |
+| `/hz config [key] [value]` | View or set config values |
 
 ---
 
@@ -558,13 +595,18 @@ src/main/java/dev/hytalezombie/
 ?   ??? PlayerConnectionListener.java   # Player join utility
 ??? manager/
 ?   ??? BarrierManager.java             # CRUD for window barriers
-?   ??? DebugManager.java               # Debug mode + spawn node visualization
+?   ??? DebugManager.java               # Debug mode + in-world marker visualization
 ?   ??? GameManagerProvider.java        # Interface for accessing all managers
-?   ??? GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy, zone tracking)
+?   ??? GameSession.java                # MAIN GAME ORCHESTRATOR (tick, spawn, damage, economy, AI, zone tracking)
 ?   ??? PlayerDataManager.java          # Per-player state management
 ?   ??? RoundManager.java               # Round tracking + scaling calculations
+?   ??? ScoreboardManager.java          # Player tracking + HUD state bridge
 ?   ??? WeaponRegistry.java             # All weapon definitions
 ?   ??? ZoneManager.java                # Map zone connectivity, door positions, door-crossing detection
+??? persistence/
+?   ??? MapDataStore.java               # Full map layout save/load (spawns, zones, doors, barriers)
+??? util/
+?   ??? WorldMarkerUtil.java            # Temporary in-world debug marker blocks
 ??? model/
 ?   ??? Barrier.java                    # Barrier state machine (INTACT?DAMAGED?BROKEN)
 ?   ??? MapZone.java                    # Named zone with door cost + door positions
@@ -641,6 +683,45 @@ src/main/java/dev/hytalezombie/
 - `GameSession.java` — Added `ZoneManager` field, `playerZoneIds` map, `updateZoneOccupancy()`, `handleZoneTransition()`
 - `HytaleZombiePlugin.java` — Creates `ZoneManager("spawn_room")`, wires into `GameSession`
 - `HytaleZombieCommand.java` — Added `/hz addzone`, `/hz connectzone`, `/hz setdoor` (with optional width/height)
+
+### ✅ Phase 7: Command Cleanup, Debug Markers, and Full Map Persistence
+**Feature**: Refactored the entire `/hz` command surface, added in-world debug visualization, and made map setup fully persistent.
+
+**Command cleanup:**
+- Replaced the giant `switch` in `HytaleZombieCommand.java` with a `Map<String, Subcommand>` registry.
+- Fixed broken commands:
+  - `/hz round [n]` now actually sets the round and re-prepares spawns.
+  - `/hz points [player] [amount]` now actually sets points via `PlayerDataManager`.
+  - `/hz giveweapon <player> <weapon_id>` now looks up real weapons from `WeaponRegistry`.
+- Removed ambiguous argument forms:
+  - `/hz setspawn` now requires `here` or explicit `<x> <y> <z>`.
+  - `/hz spawnzombie` now uses explicit `<count> [zone]` order.
+- Added convenience commands:
+  - `/hz setup`, `/hz validate`, `/hz savemap`
+  - `/hz addspawn here [radius]`
+  - `/hz adddoor <A> <B> [width] [height]`
+  - `/hz reset`
+- Added barrier commands:
+  - `/hz barrier add <zone> [x y z]`
+  - `/hz barrier remove [x y z]`
+  - `/hz barrier list [zone]`
+
+**Debug markers:**
+- Added `WorldMarkerUtil.java` to place temporary blocks via `LocalCachedChunkAccessor`.
+- Updated `DebugManager.java` to support layered toggles (`spawns`, `barriers`, `zones`).
+- Markers auto-refresh when map setup changes.
+- Original blocks are restored when markers are cleared.
+
+**Full map persistence:**
+- Added `MapDataStore.java` that saves/loads spawns, zones, doors, and barriers to `run/hytalezombie_data/map_data.json`.
+- `HytaleZombiePlugin` loads the map on startup and saves after every mutation command.
+- Legacy `spawn_nodes.json` loading is preserved for backward compatibility.
+
+**Tests:**
+- Added `RoundManager.setRound()` tests.
+- Added `MapDataStoreTest.java`.
+- Added `DebugManagerTest.java`.
+- Total test count increased from 245 to 259.
 
 ---
 

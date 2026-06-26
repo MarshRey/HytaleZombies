@@ -78,6 +78,16 @@ public class RoundManager {
     }
 
     /**
+     * Sets the current round directly. Used by admin commands.
+     */
+    public void setRound(int round) {
+        if (round < 1) return;
+        this.currentRound = round;
+        this.activeZombieCount = 0;
+        LOGGER.log(Level.INFO, "HytaleZombie round set to {0}", currentRound);
+    }
+
+    /**
      * Calculates the health for a zombie based on the current round.
      * Health scales by the configured multiplier each round.
      */

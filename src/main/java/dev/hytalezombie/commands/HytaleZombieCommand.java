@@ -12,18 +12,27 @@ import dev.hytalezombie.HytaleZombiePlugin;
 import dev.hytalezombie.config.HytaleZombieConfig;
 import dev.hytalezombie.entity.EntitySpawnHelper;
 import dev.hytalezombie.manager.GameSession;
+import dev.hytalezombie.model.Barrier;
+import dev.hytalezombie.model.MapZone;
 import dev.hytalezombie.model.Perk;
 import dev.hytalezombie.model.PowerUp;
 import dev.hytalezombie.model.Vector3f;
+import dev.hytalezombie.model.Vector3i;
 import dev.hytalezombie.model.Weapon;
 import dev.hytalezombie.spawn.SpawnNode;
 
 import org.joml.Vector3d;
 
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
 import java.util.logging.Level;
 
 /**
@@ -33,6 +42,24 @@ import java.util.logging.Level;
 public class HytaleZombieCommand extends AbstractCommand {
 
     private final HytaleZombiePlugin plugin;
+    private final Map<String, Subcommand> subcommands = new HashMap<>();
+
+    /**
+     * Describes a single /hz subcommand: name, aliases, minimum arg count,
+     * one-line usage, and handler.
+     */
+    private record Subcommand(
+            String name,
+            List<String> aliases,
+            int minArgs,
+            String usage,
+            BiConsumer<CommandContext, String[]> handler
+    ) {
+        boolean matches(String input) {
+            String lower = input.toLowerCase();
+            return name.equals(lower) || aliases.contains(lower);
+        }
+    }
 
     public HytaleZombieCommand(HytaleZombiePlugin plugin) {
         super("hytalezombie", "Admin command for HytaleZombie");
@@ -47,174 +74,110 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         // Allow extra arguments since we parse subcommands manually in execute()
         setAllowsExtraArguments(true);
+
+        registerSubcommands();
+    }
+
+    /**
+     * Registers all /hz subcommands. Keeping this in one place makes the command
+     * surface easy to scan and update.
+     */
+    private void registerSubcommands() {
+        register("start", 0, "/hz start", (ctx, args) -> handleStart(ctx));
+        register("stop", 0, "/hz stop", (ctx, args) -> handleStop(ctx));
+        register("round", 0, "/hz round [n]", this::handleRound);
+        register("info", 0, "/hz info", (ctx, args) -> handleInfo(ctx));
+        register("state", 0, "/hz state", (ctx, args) -> handleState(ctx));
+        register("nextround", 0, "/hz nextround", (ctx, args) -> handleNextRound(ctx));
+        register("reset", 0, "/hz reset", (ctx, args) -> handleReset(ctx));
+
+        register("map", 0, "/hz map", (ctx, args) -> {
+            plugin.setupDefaultMap();
+            ctx.sendMessage(Message.raw("[HytaleZombie] Default test map set up with spawn nodes."));
+        });
+
+        register("setspawn", 1, "/hz setspawn here [radius] OR /hz setspawn <zone> <x> <y> <z> [radius]", this::handleSetSpawn);
+        register("addspawn", 0, "/hz addspawn here [radius]", this::handleAddSpawn);
+        register("delspawn", 1, "/hz delspawn <zone> [index]", this::handleDelSpawn);
+        register("listspawns", 0, "/hz listspawns [zone]", this::handleListSpawns);
+        register("clearspawns", 0, "/hz clearspawns", (ctx, args) -> handleClearSpawns(ctx));
+
+        register("addzone", 2, "/hz addzone <zoneId> <displayName> [cost]", this::handleAddZone);
+        register("connectzone", 2, "/hz connectzone <zoneA> <zoneB>", this::handleConnectZone);
+        register("setdoor", 8, "/hz setdoor <zoneA> <zoneB> <x1> <y1> <z1> <x2> <y2> <z2>", this::handleSetDoor);
+        register("adddoor", 2, "/hz adddoor <zoneA> <zoneB> [width] [height]", this::handleAddDoor);
+        register("removezone", 1, "/hz removezone <zoneId>", this::handleRemoveZone);
+        register("markzone", 1, "/hz markzone <zone>", this::handleMarkZone);
+        register("unmarkzone", 1, "/hz unmarkzone <zone>", this::handleUnmarkZone);
+        register("listzones", 0, "/hz listzones", (ctx, args) -> handleListZones(ctx));
+
+        register("barrier", 1, "/hz barrier <add|remove|list> ...", this::handleBarrier);
+
+        register("spawnzombie", 0, "/hz spawnzombie <count> [zone]", this::handleSpawnZombie);
+        register("spawnhere", 0, "/hz spawnhere", (ctx, args) -> handleSpawnHere(ctx));
+        register("summon", 0, "/hz summon", (ctx, args) -> handleSpawnHere(ctx));
+        register("killall", 0, "/hz killall", (ctx, args) -> handleKillAll(ctx));
+        register("zombieinfo", 0, "/hz zombieinfo", (ctx, args) -> handleZombieInfo(ctx));
+        register("spawninfo", 0, "/hz spawninfo", (ctx, args) -> handleSpawnInfo(ctx));
+
+        register("points", 0, "/hz points [player] [amount]", this::handlePoints);
+        register("powerup", 1, "/hz powerup <type>", this::handleGivePowerUp);
+        register("giveweapon", 1, "/hz giveweapon <player> <weapon_id>", this::handleGiveWeapon);
+        register("giveperk", 2, "/hz giveperk <player> <perk_type>", this::handleGivePerk);
+
+        register("debug", 0, "/hz debug [spawns|barriers|zones]", this::handleDebug);
+        register("config", 0, "/hz config [key] [value]", this::handleConfig);
+        register("setup", 0, "/hz setup", (ctx, args) -> handleSetup(ctx));
+        register("validate", 0, "/hz validate", (ctx, args) -> handleValidate(ctx));
+        register("savemap", 0, "/hz savemap", (ctx, args) -> handleSaveMap(ctx));
+    }
+
+    private void register(String name, int minArgs, String usage, BiConsumer<CommandContext, String[]> handler, String... aliases) {
+        Subcommand cmd = new Subcommand(name, Arrays.asList(aliases), minArgs, usage, handler);
+        subcommands.put(name, cmd);
+        for (String alias : aliases) {
+            subcommands.put(alias, cmd);
+        }
     }
 
     @Override
     protected CompletableFuture<Void> execute(CommandContext ctx) {
-        // CommandContext provides getInputString() for the full input
         String input = ctx.getInputString();
         String[] args = (input == null || input.isEmpty()) ? new String[0] : input.split(" ");
 
-        // Log the raw input for debugging
         plugin.getLogger().at(java.util.logging.Level.INFO).log("HytaleZombieCommand received input: '{0}'", input);
+
+        // Strip the leading command name if the caller included it
+        if (args.length > 0) {
+            String first = args[0].toLowerCase();
+            if (first.equals("hytalezombie") || first.equals("hz") || first.equals("zombie")) {
+                args = Arrays.copyOfRange(args, 1, args.length);
+            }
+        }
 
         if (args.length == 0) {
             sendUsage(ctx);
             return CompletableFuture.completedFuture(null);
         }
 
-        String subCommand = args[0].toLowerCase();
-
-        // Handle the case where getInputString() includes the command name itself
-        // e.g., "hytalezombie start" instead of just "start"
-        if (subCommand.equals("hytalezombie") || subCommand.equals("hz") || subCommand.equals("zombie")) {
-            if (args.length > 1) {
-                subCommand = args[1].toLowerCase();
-                // Rebuild args without the command name
-                String[] newArgs = new String[args.length - 1];
-                System.arraycopy(args, 1, newArgs, 0, args.length - 1);
-                args = newArgs;
-            } else {
-                sendUsage(ctx);
-                return CompletableFuture.completedFuture(null);
-            }
+        String subName = args[0].toLowerCase();
+        Subcommand sub = subcommands.get(subName);
+        if (sub == null) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Unknown subcommand: " + subName));
+            sendUsage(ctx);
+            return CompletableFuture.completedFuture(null);
         }
 
-        switch (subCommand) {
-            // ===== Match Controls =====
-            case "start":
-                handleStart(ctx);
-                break;
+        if (args.length - 1 < sub.minArgs()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: " + sub.usage()));
+            return CompletableFuture.completedFuture(null);
+        }
 
-            case "stop":
-                handleStop(ctx);
-                break;
-
-            case "round":
-                handleRound(ctx, args);
-                break;
-
-            case "info":
-                handleInfo(ctx);
-                break;
-
-            // ===== Map Setup =====
-            case "map":
-                plugin.setupDefaultMap();
-                ctx.sendMessage(Message.raw("[HytaleZombie] Default test map set up with spawn nodes."));
-                break;
-
-            // Map prefabs are now handled by Hytale's built-in prefab system.
-            // Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/
-
-            case "setspawn":
-                handleSetSpawn(ctx, args);
-                break;
-
-            case "delspawn":
-                handleDelSpawn(ctx, args);
-                break;
-
-            case "listspawns":
-            case "listspawn":
-                handleListSpawns(ctx, args);
-                break;
-
-            case "clearspawns":
-                handleClearSpawns(ctx);
-                break;
-
-            // ===== Zombie Testing =====
-            case "spawnzombie":
-            case "spawn":
-                handleSpawnZombie(ctx, args);
-                break;
-
-            case "spawnhere":
-            case "summon":
-                handleSpawnHere(ctx);
-                break;
-
-            case "killall":
-                handleKillAll(ctx);
-                break;
-
-            case "zombieinfo":
-                handleZombieInfo(ctx);
-                break;
-
-            case "spawninfo":
-                handleSpawnInfo(ctx);
-                break;
-
-            // ===== Economy & Items =====
-            case "points":
-                handlePoints(ctx, args);
-                break;
-
-            case "powerup":
-                handleGivePowerUp(ctx, args);
-                break;
-
-            case "giveweapon":
-                handleGiveWeapon(ctx, args);
-                break;
-
-            case "giveperk":
-                handleGivePerk(ctx, args);
-                break;
-
-            // ===== Round Testing =====
-            case "nextround":
-                handleNextRound(ctx);
-                break;
-
-            // ===== Debug =====
-            case "debug":
-                handleDebug(ctx);
-                break;
-
-            case "state":
-                handleState(ctx);
-                break;
-
-            case "config":
-                handleConfig(ctx, args);
-                break;
-
-            // ===== Zone Management =====
-            case "addzone":
-                handleAddZone(ctx, args);
-                break;
-
-            case "connectzone":
-                handleConnectZone(ctx, args);
-                break;
-
-            case "setdoor":
-                handleSetDoor(ctx, args);
-                break;
-
-            case "removezone":
-                handleRemoveZone(ctx, args);
-                break;
-
-            case "markzone":
-                handleMarkZone(ctx, args);
-                break;
-
-            case "unmarkzone":
-                handleUnmarkZone(ctx, args);
-                break;
-
-            case "listzones":
-                handleListZones(ctx);
-                break;
-
-            default:
-                ctx.sendMessage(Message.raw("[HytaleZombie] Unknown subcommand: " + subCommand));
-                sendUsage(ctx);
-                break;
+        try {
+            sub.handler().accept(ctx, args);
+        } catch (Exception e) {
+            plugin.getLogger().at(Level.WARNING).log("Error handling /hz {0}: {1}", new Object[]{subName, e.getMessage()});
+            ctx.sendMessage(Message.raw("[HytaleZombie] Command failed: " + e.getMessage()));
         }
 
         return CompletableFuture.completedFuture(null);
@@ -226,40 +189,47 @@ public class HytaleZombieCommand extends AbstractCommand {
 
     private void sendUsage(CommandContext ctx) {
         ctx.sendMessage(Message.raw("=== HytaleZombie Commands ==="));
-        ctx.sendMessage(Message.raw("Match: /hz start | stop | round [n] | nextround | info | state"));
+        ctx.sendMessage(Message.raw("Match: /hz start | stop | round [n] | nextround | info | state | reset"));
         ctx.sendMessage(Message.raw("Map Setup:"));
-        ctx.sendMessage(Message.raw("  Prefabs: Place .prefab files in run/.cache/prefabs/Hytale_Hytale/Server/Prefabs/"));
+        ctx.sendMessage(Message.raw("  /hz setup                             - Start map setup wizard"));
+        ctx.sendMessage(Message.raw("  /hz validate                          - Check map is playable"));
+        ctx.sendMessage(Message.raw("  /hz savemap                           - Save full map layout"));
         ctx.sendMessage(Message.raw("Spawn Points:"));
-        ctx.sendMessage(Message.raw("  /hz setspawn <zone> [radius]          - Add spawn at 0,0,0"));
+        ctx.sendMessage(Message.raw("  /hz setspawn here [radius]            - Add spawn at your feet"));
         ctx.sendMessage(Message.raw("  /hz setspawn <zone> <x> <y> <z> [r]  - Add spawn at coords"));
+        ctx.sendMessage(Message.raw("  /hz addspawn here [radius]            - Alias for setspawn here"));
         ctx.sendMessage(Message.raw("  /hz delspawn <zone> [index]           - Remove zone's spawns"));
         ctx.sendMessage(Message.raw("  /hz listspawns [zone]                 - List all spawns"));
         ctx.sendMessage(Message.raw("  /hz clearspawns                       - Remove all spawns"));
+        ctx.sendMessage(Message.raw("Zones & Doors:"));
+        ctx.sendMessage(Message.raw("  /hz addzone <id> <name> [cost]        - Register a new zone"));
+        ctx.sendMessage(Message.raw("  /hz connectzone <A> <B>               - Connect two zones"));
+        ctx.sendMessage(Message.raw("  /hz setdoor <A> <B> x1 y1 z1 x2 y2 z2 - Door AABB from two corners"));
+        ctx.sendMessage(Message.raw("  /hz adddoor <A> <B> [width] [height]  - Door centered on you"));
+        ctx.sendMessage(Message.raw("  /hz removezone <zone>                 - Remove a zone"));
+        ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
+        ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
+        ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones"));
+        ctx.sendMessage(Message.raw("Barriers:"));
+        ctx.sendMessage(Message.raw("  /hz barrier add <zone> [x y z]        - Add barrier at target block"));
+        ctx.sendMessage(Message.raw("  /hz barrier remove [x y z]            - Remove barrier"));
+        ctx.sendMessage(Message.raw("  /hz barrier list [zone]               - List barriers"));
         ctx.sendMessage(Message.raw("Zombie Testing:"));
-        ctx.sendMessage(Message.raw("  /hz spawnzombie [zone] [count]        - Spawn zombie(s) at spawn nodes"));
-        ctx.sendMessage(Message.raw("  /hz spawnhere                         - Spawn zombie right at your position"));
-        ctx.sendMessage(Message.raw("  /hz summon                            - (alias for spawnhere)"));
+        ctx.sendMessage(Message.raw("  /hz spawnzombie <count> [zone]        - Spawn zombie(s) at spawn nodes"));
+        ctx.sendMessage(Message.raw("  /hz spawnhere                         - Spawn zombie at your position"));
+        ctx.sendMessage(Message.raw("  /hz summon                            - Alias for spawnhere"));
         ctx.sendMessage(Message.raw("  /hz killall                           - Kill all active zombies"));
         ctx.sendMessage(Message.raw("  /hz zombieinfo                        - List all zombie stats"));
         ctx.sendMessage(Message.raw("  /hz spawninfo                         - Spawn progress this round"));
-        ctx.sendMessage(Message.raw("Zones:"));
-        ctx.sendMessage(Message.raw("  /hz addzone <zone> <name> [cost]      - Register a new zone"));
-        ctx.sendMessage(Message.raw("  /hz connectzone <zoneA> <zoneB>       - Connect two zones"));
-        ctx.sendMessage(Message.raw("  /hz setdoor <A> <B> <x1> <y1> <z1> <x2> <y2> <z2> - Place door (two corners)"));
-        ctx.sendMessage(Message.raw("  /hz removezone <zone>                 - Remove a zone (cleans up connections)"));
-        ctx.sendMessage(Message.raw("  /hz markzone <zone>                   - Mark zone as occupied"));
-        ctx.sendMessage(Message.raw("  /hz unmarkzone <zone>                 - Unmark zone"));
-        ctx.sendMessage(Message.raw("  /hz listzones                         - List all zones with spawns"));
         ctx.sendMessage(Message.raw("Economy & Items:"));
         ctx.sendMessage(Message.raw("  /hz points [player] [amount]          - Get/set points"));
         ctx.sendMessage(Message.raw("  /hz powerup <type>                    - Activate a power-up"));
         ctx.sendMessage(Message.raw("  /hz giveweapon <player> <weapon_id>   - Give player a weapon"));
         ctx.sendMessage(Message.raw("  /hz giveperk <player> <perk_type>     - Give player a perk"));
         ctx.sendMessage(Message.raw("Debug:"));
-        ctx.sendMessage(Message.raw("  /hz debug                             - Toggle debug mode"));
+        ctx.sendMessage(Message.raw("  /hz debug [spawns|barriers|zones]     - Toggle debug markers"));
         ctx.sendMessage(Message.raw("  /hz config [key] [value]              - View/set config"));
         ctx.sendMessage(Message.raw("  /hz state                             - Full game state dump"));
-        ctx.sendMessage(Message.raw("Tip: /hz setspawn spawn_room 10.5 0 -20.3 4.0"));
     }
 
     // ========================================================================
@@ -290,9 +260,21 @@ public class HytaleZombieCommand extends AbstractCommand {
     }
 
     private void handleRound(CommandContext ctx, String[] args) {
-        int round = args.length > 1 ? parseIntSafe(args[1]) : -1;
-        if (round > 0) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Set round to: " + round));
+        GameSession session = plugin.getGameSession();
+        if (args.length > 1) {
+            int round = parseIntSafe(args[1]);
+            if (round < 1) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid round number: " + args[1]));
+                return;
+            }
+            if (!session.isSessionActive()) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] No active match. Start one with /hz start first."));
+                return;
+            }
+            plugin.getRoundManager().setRound(round);
+            session.prepareRoundSpawns();
+            ctx.sendMessage(Message.raw("[HytaleZombie] Set round to " + round + "!"));
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + session.getTotalZombiesForRound() + " zombies this round."));
         } else {
             ctx.sendMessage(Message.raw(
                 "[HytaleZombie] Current round: " + plugin.getRoundManager().getCurrentRound()
@@ -314,90 +296,113 @@ public class HytaleZombieCommand extends AbstractCommand {
     // ========================================================================
 
     /**
-     * /hz setspawn <zone> [radius]
+     * /hz setspawn here [radius]
      *    or
      * /hz setspawn <zone> <x> <y> <z> [radius]
      *
      * Adds a spawn point for the given zone.
-     * With just <zone> and [radius], uses coordinates (0, 0, 0).
-     * With <zone> <x> <y> <z>, uses the specified coordinates.
-     * Example: /hz setspawn room_1
-     *          /hz setspawn room_1 10.5 0 -20.3 4.0
-     *          /hz setspawn room_2 3.5
+     * Use "here" to place a spawn at the admin's feet.
+     * Use explicit coordinates to place a spawn anywhere.
      */
     private void handleSetSpawn(CommandContext ctx, String[] args) {
-        if (args.length < 2) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setspawn <zone> [radius]"));
-            ctx.sendMessage(Message.raw("  Set spawn by coordinates: /hz setspawn <zone> <x> <y> <z> [radius]"));
-            ctx.sendMessage(Message.raw("  Example: /hz setspawn spawn_room"));
-            ctx.sendMessage(Message.raw("  Example: /hz setspawn room_2 10.5 0 -20.3 4.0"));
-            ctx.sendMessage(Message.raw("  Example: /hz setspawn room_2 3.5"));
+        if (args.length < 2 || args[1].equalsIgnoreCase("help")) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage:"));
+            ctx.sendMessage(Message.raw("  /hz setspawn here [radius]"));
+            ctx.sendMessage(Message.raw("  /hz setspawn <zone> <x> <y> <z> [radius]"));
             return;
         }
 
-        String zoneId = args[1];
-        float x = 0, y = 0, z = 0;
-        float radius = 5.0f; // default radius
+        String zoneId;
+        Vector3f position;
+        float radius = 5.0f;
 
-        if (args.length >= 5) {
-            // Format: setspawn <zone> <x> <y> <z> [radius]
-            try {
-                x = Float.parseFloat(args[2]);
-                y = Float.parseFloat(args[3]);
-                z = Float.parseFloat(args[4]);
-            } catch (NumberFormatException e) {
-                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use numbers for x y z."));
-                ctx.sendMessage(Message.raw("  Example: /hz setspawn spawn_room 10.5 0 -20.3"));
+        if (args[1].equalsIgnoreCase("here")) {
+            Optional<Vector3f> posOpt = getPlayerPosition(ctx);
+            if (posOpt.isEmpty()) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] 'here' can only be used by a player."));
                 return;
             }
+            zoneId = plugin.getGameSession().getPlayerZone(getSenderPlayerId(ctx));
+            position = posOpt.get();
+            if (args.length >= 3) {
+                radius = parseFloatSafe(args[2]);
+                if (Float.isNaN(radius) || radius < 0) {
+                    ctx.sendMessage(Message.raw("[HytaleZombie] Invalid radius: " + args[2]));
+                    return;
+                }
+            }
+        } else {
+            if (args.length < 5) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz setspawn <zone> <x> <y> <z> [radius]"));
+                return;
+            }
+            zoneId = args[1];
+            float x = parseFloatSafe(args[2]);
+            float y = parseFloatSafe(args[3]);
+            float z = parseFloatSafe(args[4]);
+            if (Float.isNaN(x) || Float.isNaN(y) || Float.isNaN(z)) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid coordinates. Use numbers for x y z."));
+                return;
+            }
+            position = new Vector3f(x, y, z);
             if (args.length >= 6) {
-                try {
-                    radius = Float.parseFloat(args[5]);
-                    if (radius < 0) {
-                        ctx.sendMessage(Message.raw("[HytaleZombie] Radius must be a positive number!"));
-                        return;
-                    }
-                } catch (NumberFormatException e) {
+                radius = parseFloatSafe(args[5]);
+                if (Float.isNaN(radius) || radius < 0) {
                     ctx.sendMessage(Message.raw("[HytaleZombie] Invalid radius: " + args[5]));
                     return;
                 }
             }
-        } else if (args.length >= 3) {
-            // Could be: setspawn <zone> <radius>
-            try {
-                radius = Float.parseFloat(args[2]);
-                if (radius < 0) {
-                    ctx.sendMessage(Message.raw("[HytaleZombie] Radius must be a positive number!"));
-                    return;
-                }
-            } catch (NumberFormatException e) {
+        }
+
+        ensureZoneExists(zoneId);
+        registerSpawnNode(ctx, zoneId, position, radius);
+    }
+
+    /**
+     * /hz addspawn here [radius]
+     *
+     * Convenience alias that places a spawn node at the admin's feet
+     * in their current zone.
+     */
+    private void handleAddSpawn(CommandContext ctx, String[] args) {
+        Optional<Vector3f> posOpt = getPlayerPosition(ctx);
+        if (posOpt.isEmpty()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] This command can only be used by a player."));
+            return;
+        }
+
+        float radius = 5.0f;
+        if (args.length >= 3) {
+            radius = parseFloatSafe(args[2]);
+            if (Float.isNaN(radius) || radius < 0) {
                 ctx.sendMessage(Message.raw("[HytaleZombie] Invalid radius: " + args[2]));
-                ctx.sendMessage(Message.raw("  If providing coordinates, use all 3: /hz setspawn " + zoneId + " <x> <y> <z> [radius]"));
                 return;
             }
         }
 
-        // Auto-create zone in ZoneManager if it doesn't exist yet
+        String zoneId = plugin.getGameSession().getPlayerZone(getSenderPlayerId(ctx));
+        ensureZoneExists(zoneId);
+        registerSpawnNode(ctx, zoneId, posOpt.get(), radius);
+    }
+
+    private void ensureZoneExists(String zoneId) {
         if (plugin.getZoneManager().getZone(zoneId) == null) {
-            dev.hytalezombie.model.MapZone newZone =
-                new dev.hytalezombie.model.MapZone(zoneId, zoneId, 1000);
+            MapZone newZone = new MapZone(zoneId, zoneId, 1000);
             plugin.getZoneManager().registerZone(newZone);
-            ctx.sendMessage(Message.raw("[HytaleZombie] Auto-created zone '" + zoneId
-                + "' (spawn points can create zones automatically)."));
         }
+    }
 
-        Vector3f position = new Vector3f(x, y, z);
+    private void registerSpawnNode(CommandContext ctx, String zoneId, Vector3f position, float radius) {
         SpawnNode node = new SpawnNode(zoneId, position, radius);
-
         plugin.getSpawnManager().registerSpawnNode(node);
         plugin.getSpawnManager().markZoneOccupied(zoneId);
-
-        // Persist spawn nodes to disk (survives server restarts)
-        plugin.saveSpawnData();
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
 
         ctx.sendMessage(Message.raw("[HytaleZombie] Spawn point added!"));
         ctx.sendMessage(Message.raw("  Zone: " + zoneId));
-        ctx.sendMessage(Message.raw("  Position: (" + String.format("%.1f", x) + ", " + String.format("%.1f", y) + ", " + String.format("%.1f", z) + ")"));
+        ctx.sendMessage(Message.raw("  Position: (" + String.format("%.1f", position.x()) + ", "
+            + String.format("%.1f", position.y()) + ", " + String.format("%.1f", position.z()) + ")"));
         ctx.sendMessage(Message.raw("  Radius: " + String.format("%.1f", radius) + " blocks"));
     }
 
@@ -445,7 +450,7 @@ public class HytaleZombieCommand extends AbstractCommand {
 
             // Remove a specific node by index
             if (plugin.getSpawnManager().removeSpawnNode(zoneId, index)) {
-                plugin.saveSpawnData();
+                plugin.saveMapData();
                 ctx.sendMessage(Message.raw("[HytaleZombie] Removed spawn node [" + index + "] from zone '" + zoneId + "'"));
             } else {
                 ctx.sendMessage(Message.raw("[HytaleZombie] Failed to remove spawn node [" + index + "]"));
@@ -453,7 +458,7 @@ public class HytaleZombieCommand extends AbstractCommand {
         } else {
             // Remove all nodes in this zone
             plugin.getSpawnManager().removeNodesInZone(zoneId);
-            plugin.saveSpawnData();
+            plugin.saveMapData();
             ctx.sendMessage(Message.raw("[HytaleZombie] All spawn nodes in zone '" + zoneId + "' removed!"));
         }
     }
@@ -511,7 +516,7 @@ public class HytaleZombieCommand extends AbstractCommand {
      */
     private void handleClearSpawns(CommandContext ctx) {
         plugin.getSpawnManager().clearAllNodes();
-        plugin.saveSpawnData();
+        plugin.saveMapData();
         ctx.sendMessage(Message.raw("[HytaleZombie] All spawn points cleared!"));
         ctx.sendMessage(Message.raw("  Use /hz setspawn <zone> to add new ones."));
     }
@@ -548,6 +553,8 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         dev.hytalezombie.model.MapZone zone = new dev.hytalezombie.model.MapZone(zoneId, displayName, doorCost);
         plugin.getZoneManager().registerZone(zone);
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
         ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' (" + displayName
             + ") registered. Cost to unlock: " + doorCost + " points."));
     }
@@ -568,6 +575,8 @@ public class HytaleZombieCommand extends AbstractCommand {
         String zoneA = args[1];
         String zoneB = args[2];
         plugin.getZoneManager().connectZones(zoneA, zoneB);
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
         ctx.sendMessage(Message.raw("[HytaleZombie] Zones '" + zoneA + "' and '" + zoneB
             + "' connected. Use /hz setdoor to place the door between them."));
     }
@@ -617,6 +626,8 @@ public class HytaleZombieCommand extends AbstractCommand {
         }
 
         var area = plugin.getZoneManager().getDoorArea(zoneA, zoneB);
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
         ctx.sendMessage(Message.raw("[HytaleZombie] Door area placed between '" + zoneA + "' and '"
             + zoneB + "'. " + (area != null ? area.toString() : "")
             + ". Players entering this area will cross zones."));
@@ -639,7 +650,8 @@ public class HytaleZombieCommand extends AbstractCommand {
         String zoneId = args[1];
         try {
             plugin.getZoneManager().removeZone(zoneId, plugin.getSpawnManager());
-            plugin.saveSpawnData();
+            plugin.saveMapData();
+            plugin.getDebugManager().refreshMarkers(plugin);
             ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' removed. All connections and spawns cleaned up."));
         } catch (IllegalArgumentException e) {
             ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
@@ -660,7 +672,8 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         String zoneId = args[1];
         plugin.getSpawnManager().markZoneOccupied(zoneId);
-        plugin.saveSpawnData();
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
         ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' marked as occupied! Zombies will now spawn here."));
     }
 
@@ -678,7 +691,8 @@ public class HytaleZombieCommand extends AbstractCommand {
 
         String zoneId = args[1];
         plugin.getSpawnManager().markZoneUnoccupied(zoneId);
-        plugin.saveSpawnData();
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
         ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' marked as unoccupied."));
     }
 
@@ -738,53 +752,167 @@ public class HytaleZombieCommand extends AbstractCommand {
     }
 
     // ========================================================================
+    //  BARRIER COMMANDS
+    // ========================================================================
+
+    /**
+     * /hz barrier add <zone> [x y z]
+     * /hz barrier remove [x y z]
+     * /hz barrier list [zone]
+     *
+     * Manages window barriers. If coordinates are omitted, uses the block
+     * the admin is standing on.
+     */
+    private void handleBarrier(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage:"));
+            ctx.sendMessage(Message.raw("  /hz barrier add <zone> [x y z]"));
+            ctx.sendMessage(Message.raw("  /hz barrier remove [x y z]"));
+            ctx.sendMessage(Message.raw("  /hz barrier list [zone]"));
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+        switch (action) {
+            case "add" -> handleBarrierAdd(ctx, args);
+            case "remove", "delete", "del" -> handleBarrierRemove(ctx, args);
+            case "list", "show" -> handleBarrierList(ctx, args);
+            default -> {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Unknown barrier action: " + action));
+                ctx.sendMessage(Message.raw("  Use add, remove, or list."));
+            }
+        }
+    }
+
+    private void handleBarrierAdd(CommandContext ctx, String[] args) {
+        if (args.length < 3) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz barrier add <zone> [x y z]"));
+            return;
+        }
+
+        String zoneId = args[2];
+        Vector3i position;
+        if (args.length >= 6) {
+            try {
+                int x = parseCoord(args[3], "x");
+                int y = parseCoord(args[4], "y");
+                int z = parseCoord(args[5], "z");
+                position = new Vector3i(x, y, z);
+            } catch (IllegalArgumentException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
+                return;
+            }
+        } else {
+            Optional<Vector3i> posOpt = getPlayerBlockPosition(ctx);
+            if (posOpt.isEmpty()) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] 'here' placement requires a player. Provide x y z instead."));
+                return;
+            }
+            position = posOpt.get();
+        }
+
+        if (plugin.getBarrierManager().hasBarrierAt(position)) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] A barrier already exists at " + position + "."));
+            return;
+        }
+
+        plugin.getBarrierManager().registerBarrier(new Barrier(zoneId, position));
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
+        ctx.sendMessage(Message.raw("[HytaleZombie] Barrier added in zone '" + zoneId + "' at " + position));
+    }
+
+    private void handleBarrierRemove(CommandContext ctx, String[] args) {
+        Vector3i position;
+        if (args.length >= 5) {
+            try {
+                int x = parseCoord(args[2], "x");
+                int y = parseCoord(args[3], "y");
+                int z = parseCoord(args[4], "z");
+                position = new Vector3i(x, y, z);
+            } catch (IllegalArgumentException e) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
+                return;
+            }
+        } else {
+            Optional<Vector3i> posOpt = getPlayerBlockPosition(ctx);
+            if (posOpt.isEmpty()) {
+                ctx.sendMessage(Message.raw("[HytaleZombie] Provide x y z or run as a player."));
+                return;
+            }
+            position = posOpt.get();
+        }
+
+        if (!plugin.getBarrierManager().hasBarrierAt(position)) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No barrier at " + position + "."));
+            return;
+        }
+
+        plugin.getBarrierManager().removeBarrier(position);
+        plugin.saveMapData();
+        plugin.getDebugManager().refreshMarkers(plugin);
+        ctx.sendMessage(Message.raw("[HytaleZombie] Barrier removed at " + position));
+    }
+
+    private void handleBarrierList(CommandContext ctx, String[] args) {
+        String filterZone = args.length > 2 ? args[2] : null;
+        Collection<Barrier> barriers;
+        if (filterZone != null) {
+            barriers = plugin.getBarrierManager().getBarriersInZone(filterZone);
+        } else {
+            barriers = new ArrayList<>();
+            for (String zoneId : plugin.getZoneManager().getAllZones().stream().map(MapZone::getZoneId).toList()) {
+                barriers.addAll(plugin.getBarrierManager().getBarriersInZone(zoneId));
+            }
+        }
+
+        ctx.sendMessage(Message.raw("=== Barriers ==="));
+        if (barriers.isEmpty()) {
+            ctx.sendMessage(Message.raw("  No barriers registered."));
+            ctx.sendMessage(Message.raw("  Use /hz barrier add <zone> [x y z] to add one."));
+            return;
+        }
+
+        for (Barrier barrier : barriers) {
+            ctx.sendMessage(Message.raw("  * " + barrier.getZoneId() + " @ " + barrier.getBlockPosition()
+                + " [" + barrier.getState() + "]"));
+        }
+    }
+
+    // ========================================================================
     //  ZOMBIE TESTING COMMANDS
     // ========================================================================
 
     /**
-     * /hz spawnzombie [zone] [count]
-     *    or
-     * /hz spawnzombie [count]
+     * /hz spawnzombie <count> [zone]
      *
      * Manually spawns zombies, bypassing the spawn delay timer.
-     * If a zone is specified, spawns from nodes in that zone.
-     * If count is specified, spawns that many at once.
+     * Count is required; zone is optional and defaults to active zones.
      */
     private void handleSpawnZombie(CommandContext ctx, String[] args) {
         GameSession session = plugin.getGameSession();
         boolean matchActive = session.isSessionActive();
 
-        if (!matchActive) {
-            ctx.sendMessage(Message.raw("[HytaleZombie] No active match - spawning test zombie(s) without round tracking."));
+        if (args.length < 2) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz spawnzombie <count> [zone]"));
+            return;
         }
 
-        String zoneId = null;
-        int count = 1;
-
-        // Parse arguments: spawnzombie [zone|count] [count]
-        if (args.length > 1) {
-            // Try to parse as count first
-            try {
-                count = Integer.parseInt(args[1]);
-            } catch (NumberFormatException e) {
-                // Not a number, treat as zone name
-                zoneId = args[1];
-            }
-        }
-        if (args.length > 2) {
-            try {
-                count = Integer.parseInt(args[2]);
-            } catch (NumberFormatException e) {
-                ctx.sendMessage(Message.raw("[HytaleZombie] Invalid count: " + args[2]));
-                return;
-            }
+        int count = parseIntSafe(args[1]);
+        if (count < 1) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Invalid count: " + args[1]));
+            return;
         }
 
-        // Validate zone if specified
+        String zoneId = (args.length > 2) ? args[2] : null;
         if (zoneId != null && !plugin.getSpawnManager().hasNodesInZone(zoneId)) {
             ctx.sendMessage(Message.raw("[HytaleZombie] Zone '" + zoneId + "' has no spawn nodes."));
             ctx.sendMessage(Message.raw("  Use /hz listspawns to see available zones."));
             return;
+        }
+
+        if (!matchActive) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] No active match - spawning test zombie(s) without round tracking."));
         }
 
         // Clamp count to prevent lag
@@ -962,25 +1090,28 @@ public class HytaleZombieCommand extends AbstractCommand {
      * Shows a player's current points, or sets them to a specific amount.
      */
     private void handlePoints(CommandContext ctx, String[] args) {
-        String playerId = (args.length > 1) ? args[1] : "player1";
+        String playerId;
+        if (args.length > 1) {
+            playerId = args[1];
+        } else if (ctx.isPlayer()) {
+            playerId = getSenderPlayerId(ctx);
+        } else {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz points <player> [amount]"));
+            return;
+        }
+
+        var playerData = plugin.getPlayerDataManager().getOrCreatePlayerData(playerId);
 
         if (args.length > 2) {
-            // Set points to a specific value
             try {
                 int amount = Integer.parseInt(args[2]);
-                // Simulate full override via player data
+                playerData.setPoints(amount);
                 ctx.sendMessage(Message.raw("[HytaleZombie] Set " + playerId + "'s points to " + amount));
             } catch (NumberFormatException e) {
                 ctx.sendMessage(Message.raw("[HytaleZombie] Invalid amount: " + args[2]));
             }
         } else {
-            // Show current points
-            int points = 0;
-            var playerData = plugin.getPlayerDataManager().getPlayerData(playerId);
-            if (playerData != null) {
-                points = playerData.getPoints();
-            }
-            ctx.sendMessage(Message.raw("[HytaleZombie] " + playerId + " has " + points + " points."));
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + playerId + " has " + playerData.getPoints() + " points."));
         }
     }
 
@@ -1022,27 +1153,26 @@ public class HytaleZombieCommand extends AbstractCommand {
     private void handleGiveWeapon(CommandContext ctx, String[] args) {
         if (args.length < 2) {
             ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz giveweapon <player> <weapon_id>"));
-            ctx.sendMessage(Message.raw("  Example: /hz giveweapon player_1 raygun"));
+            ctx.sendMessage(Message.raw("  Example: /hz giveweapon player_1 ray_gun"));
+            ctx.sendMessage(Message.raw("  Weapons: pistol, rifle, shotgun, smg, sniper, ray_gun, ak47, hunting_rifle, spas12, thompson, wunderwaffe, mystery_melee"));
             return;
         }
 
         String playerId = args[1];
         String weaponId = (args.length > 2) ? args[2] : "pistol";
 
-        // Create a test weapon for the player
-        Weapon weapon = new Weapon(
-            weaponId,
-            weaponId.substring(0, 1).toUpperCase() + weaponId.substring(1),
-            Weapon.WeaponType.PISTOL,
-            Weapon.Rarity.COMMON,
-            0, 25.0f, 120, 12, 4.0f, 1.5f
-        );
+        Weapon weapon = plugin.getWeaponRegistry().getWeapon(weaponId);
+        if (weapon == null) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Unknown weapon: '" + weaponId + "'"));
+            ctx.sendMessage(Message.raw("  Use /hz giveweapon <player> <weapon_id> with a valid weapon ID."));
+            return;
+        }
 
         GameSession session = plugin.getGameSession();
         if (session.isSessionActive()) {
             session.purchaseWeapon(playerId, weapon);
         }
-        ctx.sendMessage(Message.raw("[HytaleZombie] Gave weapon '" + weaponId + "' to " + playerId));
+        ctx.sendMessage(Message.raw("[HytaleZombie] Gave weapon '" + weapon.getDisplayName() + "' to " + playerId));
     }
 
     /**
@@ -1129,17 +1259,19 @@ public class HytaleZombieCommand extends AbstractCommand {
     // ========================================================================
 
     /**
-     * /hz debug
+     * /hz debug [spawns|barriers|zones]
      *
-     * Toggles debug mode (spawn node visualization, barrier info, etc.).
+     * Toggles debug markers. With no argument, toggles all markers.
+     * With a layer argument, toggles only that layer.
      */
-    private void handleDebug(CommandContext ctx) {
-        boolean isDebug = plugin.getDebugManager().toggle();
-        if (isDebug) {
-            plugin.getDebugManager().visualizeSpawnNodes(plugin.getSpawnManager());
-            ctx.sendMessage(Message.raw("[HytaleZombie] Debug mode ENABLED."));
+    private void handleDebug(CommandContext ctx, String[] args) {
+        if (args.length < 2) {
+            boolean isDebug = plugin.getDebugManager().toggleAll();
+            ctx.sendMessage(Message.raw("[HytaleZombie] Debug mode " + (isDebug ? "ENABLED" : "DISABLED") + "."));
         } else {
-            ctx.sendMessage(Message.raw("[HytaleZombie] Debug mode DISABLED."));
+            String layer = args[1].toLowerCase();
+            boolean isDebug = plugin.getDebugManager().toggleLayer(layer);
+            ctx.sendMessage(Message.raw("[HytaleZombie] Debug layer '" + layer + "' " + (isDebug ? "ENABLED" : "DISABLED") + "."));
         }
     }
 
@@ -1287,6 +1419,124 @@ public class HytaleZombieCommand extends AbstractCommand {
         }
     }
 
+    /**
+     * /hz adddoor <zoneA> <zoneB> [width] [height]
+     *
+     * Creates a door area centered on the admin. Defaults to 3 blocks wide
+     * and 3 blocks tall, spanning the admin's Y level up.
+     */
+    private void handleAddDoor(CommandContext ctx, String[] args) {
+        if (args.length < 3) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Usage: /hz adddoor <zoneA> <zoneB> [width] [height]"));
+            return;
+        }
+
+        String zoneA = args[1];
+        String zoneB = args[2];
+        int width = (args.length > 3) ? parseIntSafe(args[3]) : 3;
+        int height = (args.length > 4) ? parseIntSafe(args[4]) : 3;
+        if (width < 1) width = 3;
+        if (height < 1) height = 3;
+
+        Optional<Vector3f> posOpt = getPlayerPosition(ctx);
+        if (posOpt.isEmpty()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] This command can only be used by a player."));
+            return;
+        }
+
+        Vector3f center = posOpt.get();
+        float halfWidth = width / 2.0f;
+        Vector3f corner1 = new Vector3f(center.x() - halfWidth, center.y(), center.z() - halfWidth);
+        Vector3f corner2 = new Vector3f(center.x() + halfWidth, center.y() + height - 1, center.z() + halfWidth);
+
+        try {
+            plugin.getZoneManager().setDoorArea(zoneA, zoneB, corner1, corner2);
+            plugin.saveMapData();
+            plugin.getDebugManager().refreshMarkers(plugin);
+            ctx.sendMessage(Message.raw("[HytaleZombie] Door area added between '" + zoneA + "' and '" + zoneB + "'."));
+        } catch (IllegalArgumentException e) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] " + e.getMessage()));
+        }
+    }
+
+    /**
+     * /hz reset
+     *
+     * Stops any active match and clears all map setup data (spawns, zones,
+     * doors, barriers) except the starting zone.
+     */
+    private void handleReset(CommandContext ctx) {
+        GameSession session = plugin.getGameSession();
+        if (session.isSessionActive()) {
+            session.endMatch();
+        }
+        plugin.getSpawnManager().clearAllNodes();
+        plugin.getZoneManager().clearAll();
+        plugin.getBarrierManager().clearAll();
+        plugin.saveMapData();
+        plugin.getDebugManager().clearMarkers(plugin);
+        ctx.sendMessage(Message.raw("[HytaleZombie] Map reset complete. Starting zone preserved."));
+    }
+
+    /**
+     * /hz setup
+     *
+     * Starts the map setup wizard and ensures spawn_room exists.
+     */
+    private void handleSetup(CommandContext ctx) {
+        plugin.setupDefaultMap();
+        ctx.sendMessage(Message.raw("=== HytaleZombie Map Setup ==="));
+        ctx.sendMessage(Message.raw("1. Place spawn points: /hz addspawn here [radius]"));
+        ctx.sendMessage(Message.raw("2. Add zones: /hz addzone <id> <name> [cost]"));
+        ctx.sendMessage(Message.raw("3. Connect zones: /hz connectzone <A> <B>"));
+        ctx.sendMessage(Message.raw("4. Add doors: /hz adddoor <A> <B> [width] [height]"));
+        ctx.sendMessage(Message.raw("5. Add barriers: /hz barrier add <zone> [x y z]"));
+        ctx.sendMessage(Message.raw("6. Validate: /hz validate"));
+        ctx.sendMessage(Message.raw("7. Start match: /hz start"));
+    }
+
+    /**
+     * /hz validate
+     *
+     * Checks whether the current map is ready to play.
+     */
+    private void handleValidate(CommandContext ctx) {
+        List<String> issues = new ArrayList<>();
+
+        if (plugin.getSpawnManager().getTotalSpawnCount() == 0) {
+            issues.add("No spawn points registered. Use /hz addspawn here.");
+        }
+
+        if (!plugin.getSpawnManager().hasNodesInZone("spawn_room")) {
+            issues.add("spawn_room has no spawn points.");
+        }
+
+        for (MapZone zone : plugin.getZoneManager().getAllZones()) {
+            if (zone.isUnlocked() && !plugin.getSpawnManager().hasNodesInZone(zone.getZoneId())) {
+                issues.add("Zone '" + zone.getZoneId() + "' is unlocked but has no spawn points.");
+            }
+        }
+
+        if (issues.isEmpty()) {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Map is valid and ready to play!"));
+        } else {
+            ctx.sendMessage(Message.raw("[HytaleZombie] Validation issues:"));
+            for (String issue : issues) {
+                ctx.sendMessage(Message.raw("  - " + issue));
+            }
+        }
+    }
+
+    /**
+     * /hz savemap
+     *
+     * Forces an immediate save of the full map layout.
+     */
+    private void handleSaveMap(CommandContext ctx) {
+        plugin.saveMapData();
+        ctx.sendMessage(Message.raw("[HytaleZombie] Map layout saved."));
+    }
+
     // ========================================================================
     //  UTILITIES
     // ========================================================================
@@ -1299,6 +1549,74 @@ public class HytaleZombieCommand extends AbstractCommand {
         }
     }
 
+    private int parseCoord(String value, String name) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid " + name + " coordinate: " + value);
+        }
+    }
+
+    private float parseFloatSafe(String value) {
+        try {
+            return Float.parseFloat(value);
+        } catch (NumberFormatException e) {
+            return Float.NaN;
+        }
+    }
+
+    /**
+     * Returns the UUID string of the player who sent the command.
+     * Falls back to "console" for non-player senders.
+     */
+    private String getSenderPlayerId(CommandContext ctx) {
+        if (!ctx.isPlayer()) {
+            return "console";
+        }
+        Ref<EntityStore> ref = ctx.senderAsPlayerRef();
+        if (ref == null || !ref.isValid()) {
+            return "unknown";
+        }
+        try {
+            var uuidComp = ref.getStore().getComponent(ref,
+                com.hypixel.hytale.server.core.entity.UUIDComponent.getComponentType());
+            return uuidComp != null ? uuidComp.getUuid().toString() : "unknown";
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * Gets the admin's current world position, or empty if not a player.
+     */
+    private Optional<Vector3f> getPlayerPosition(CommandContext ctx) {
+        if (!ctx.isPlayer()) {
+            return Optional.empty();
+        }
+        Ref<EntityStore> ref = ctx.senderAsPlayerRef();
+        if (ref == null || !ref.isValid()) {
+            return Optional.empty();
+        }
+        try {
+            Store<EntityStore> store = ref.getStore();
+            TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+            if (transform != null) {
+                Vector3d pos = transform.getPosition();
+                return Optional.of(new Vector3f((float) pos.x(), (float) pos.y(), (float) pos.z()));
+            }
+        } catch (Exception e) {
+            plugin.getLogger().at(Level.FINE).log("Could not read player position: {0}", e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Gets the block position the admin is standing on, or empty if not a player.
+     */
+    private Optional<Vector3i> getPlayerBlockPosition(CommandContext ctx) {
+        return getPlayerPosition(ctx).map(pos -> new Vector3i((int) Math.floor(pos.x()), (int) Math.floor(pos.y()), (int) Math.floor(pos.z())));
+    }
+
     // ========================================================================
     //  TAB COMPLETION
     // ========================================================================
@@ -1307,26 +1625,43 @@ public class HytaleZombieCommand extends AbstractCommand {
         String input = ctx.getInputString();
         String[] parts = (input == null || input.isEmpty()) ? new String[0] : input.split(" ");
 
+        // Strip leading command name
+        String sub = parts.length > 0 ? parts[0].toLowerCase() : "";
+        int argIndex = 0;
+        if (sub.equals("hytalezombie") || sub.equals("hz") || sub.equals("zombie")) {
+            argIndex = 1;
+            sub = parts.length > 1 ? parts[1].toLowerCase() : "";
+        }
+
         // Suggest subcommands
-        if (parts.length <= 1) {
+        if (parts.length <= argIndex + 1) {
             return java.util.List.of(
-                "start", "stop", "round", "info", "state", "nextround",
-                "setspawn", "delspawn", "listspawns", "clearspawns",
-                "addzone", "connectzone", "setdoor", "removezone",
+                "start", "stop", "round", "info", "state", "nextround", "reset",
+                "setup", "validate", "savemap",
+                "setspawn", "addspawn", "delspawn", "listspawns", "clearspawns",
+                "addzone", "connectzone", "setdoor", "adddoor", "removezone",
                 "markzone", "unmarkzone", "listzones",
-                "spawnzombie", "spawnhere", "killall", "zombieinfo", "spawninfo",
+                "barrier",
+                "spawnzombie", "spawnhere", "summon", "killall", "zombieinfo", "spawninfo",
                 "points", "powerup", "giveweapon", "giveperk",
                 "debug", "config"
             );
         }
 
-        // Suggest zone names for zone-related commands
-        String sub = parts[0].toLowerCase();
-        if (sub.equals("hytalezombie") || sub.equals("hz") || sub.equals("zombie")) {
-            if (parts.length > 1) sub = parts[1].toLowerCase();
+        // Layer suggestions for debug
+        if (sub.equals("debug")) {
+            return java.util.List.of("spawns", "barriers", "zones");
         }
+
+        // Barrier action suggestions
+        if (sub.equals("barrier")) {
+            return java.util.List.of("add", "remove", "list");
+        }
+
+        // Zone name suggestions
         if (java.util.Set.of("setspawn", "delspawn", "addzone", "connectzone",
-                "setdoor", "removezone", "markzone", "unmarkzone", "spawnzombie").contains(sub)) {
+                "setdoor", "adddoor", "removezone", "markzone", "unmarkzone",
+                "spawnzombie", "barrier").contains(sub)) {
             return plugin.getZoneManager().getAllZones().stream()
                 .map(dev.hytalezombie.model.MapZone::getZoneId)
                 .collect(java.util.stream.Collectors.toList());

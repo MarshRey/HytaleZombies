@@ -17,8 +17,10 @@ import dev.hytalezombie.entity.ZombieEntity;
 import dev.hytalezombie.manager.*;
 import dev.hytalezombie.ui.ZombieHud;
 import dev.hytalezombie.model.Vector3f;
+import dev.hytalezombie.persistence.MapDataStore;
 import dev.hytalezombie.spawn.SpawnManager;
 import dev.hytalezombie.spawn.SpawnNode;
+import dev.hytalezombie.manager.WeaponRegistry;
 
 import javax.annotation.Nonnull;
 import java.nio.file.Path;
@@ -46,6 +48,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
     private ZoneManager zoneManager;
     private DebugManager debugManager;
     private ScoreboardManager scoreboardManager;
+    private WeaponRegistry weaponRegistry;
 
     // Game session orchestrator
     private GameSession gameSession;
@@ -56,9 +59,14 @@ public class HytaleZombiePlugin extends JavaPlugin {
     // Custom HUD overlays per player (playerId -> ZombieHud)
     private final Map<String, ZombieHud> playerHuds;
 
-    // Spawn node persistence
+    // Spawn node persistence (legacy path; kept for compatibility)
     /** Path to the spawn nodes JSON file, relative to the server's run/ directory. */
     static final Path SPAWN_DATA_PATH = Path.of("hytalezombie_data", "spawn_nodes.json");
+
+    // Full map persistence
+    /** Path to the full map data JSON file, relative to the server's run/ directory. */
+    static final Path MAP_DATA_PATH = Path.of("hytalezombie_data", "map_data.json");
+    private MapDataStore mapDataStore;
 
     // Game loop scheduling
     private ScheduledExecutorService gameLoopExecutor;
@@ -90,6 +98,7 @@ public class HytaleZombiePlugin extends JavaPlugin {
         this.spawnManager = new SpawnManager();
         this.zoneManager = new ZoneManager("spawn_room");
         this.debugManager = new DebugManager();
+        this.weaponRegistry = new WeaponRegistry();
 
         // Initialize the game session orchestrator
         this.gameSession = new GameSession(
@@ -106,8 +115,10 @@ public class HytaleZombiePlugin extends JavaPlugin {
         // Initialize the scoreboard manager for HUD updates
         this.scoreboardManager = new ScoreboardManager(gameSession, playerDataManager);
 
-        // Load persisted spawn nodes (survives server restarts)
+        // Load persisted spawn nodes (legacy) and full map data
         spawnManager.loadFromFile(SPAWN_DATA_PATH);
+        this.mapDataStore = new MapDataStore(MAP_DATA_PATH);
+        this.mapDataStore.load(spawnManager, zoneManager, barrierManager);
 
         getLogger().at(Level.INFO).log("HytaleZombie initialization complete.");
         return CompletableFuture.completedFuture(null);
@@ -447,13 +458,34 @@ public class HytaleZombiePlugin extends JavaPlugin {
         return scoreboardManager;
     }
 
+    public WeaponRegistry getWeaponRegistry() {
+        return weaponRegistry;
+    }
+
     /**
      * Saves the current spawn nodes and occupied zones to disk.
      * Called automatically after every spawn mutation command.
+     * Also saves the full map layout via {@link #saveMapData()}.
      */
     public void saveSpawnData() {
-        if (spawnManager != null) {
-            spawnManager.saveToFile(SPAWN_DATA_PATH);
+        saveMapData();
+    }
+
+    /**
+     * Saves the full map layout (spawns, zones, doors, barriers) to disk.
+     */
+    public void saveMapData() {
+        if (mapDataStore != null) {
+            mapDataStore.save(spawnManager, zoneManager, barrierManager);
+        }
+    }
+
+    /**
+     * Loads the full map layout from disk. Useful after manual edits.
+     */
+    public void loadMapData() {
+        if (mapDataStore != null) {
+            mapDataStore.load(spawnManager, zoneManager, barrierManager);
         }
     }
 

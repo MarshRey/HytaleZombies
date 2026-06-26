@@ -67,6 +67,13 @@ public class BarrierManager {
     }
 
     /**
+     * Returns all zone IDs that currently have barriers.
+     */
+    public Set<String> getAllZoneIds() {
+        return Set.copyOf(barriersByZone.keySet());
+    }
+
+    /**
      * Clears all barriers (useful when resetting the match).
      */
     public void clearAll() {
