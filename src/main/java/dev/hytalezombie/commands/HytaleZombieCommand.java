@@ -1,11 +1,9 @@
 package dev.hytalezombie.commands;
 
 import com.hypixel.hytale.component.Ref;
-import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.AbstractCommand;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
-import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.hytalezombie.HytaleZombiePlugin;
@@ -20,8 +18,6 @@ import dev.hytalezombie.model.Vector3f;
 import dev.hytalezombie.model.Vector3i;
 import dev.hytalezombie.model.Weapon;
 import dev.hytalezombie.spawn.SpawnNode;
-
-import org.joml.Vector3d;
 
 import java.text.DecimalFormat;
 import java.util.ArrayList;
@@ -1573,41 +1569,26 @@ public class HytaleZombieCommand extends AbstractCommand {
         if (!ctx.isPlayer()) {
             return "console";
         }
-        Ref<EntityStore> ref = ctx.senderAsPlayerRef();
-        if (ref == null || !ref.isValid()) {
-            return "unknown";
-        }
         try {
-            var uuidComp = ref.getStore().getComponent(ref,
-                com.hypixel.hytale.server.core.entity.UUIDComponent.getComponentType());
-            return uuidComp != null ? uuidComp.getUuid().toString() : "unknown";
+            return ctx.sender().getUuid().toString();
         } catch (Exception e) {
+            plugin.getLogger().at(Level.FINE).log("Could not get sender UUID: {0}", e.getMessage());
             return "unknown";
         }
     }
 
     /**
      * Gets the admin's current world position, or empty if not a player.
+     * Uses the position cached by the game loop instead of reading ECS directly,
+     * so it is safe to call from the command thread.
      */
     private Optional<Vector3f> getPlayerPosition(CommandContext ctx) {
         if (!ctx.isPlayer()) {
             return Optional.empty();
         }
-        Ref<EntityStore> ref = ctx.senderAsPlayerRef();
-        if (ref == null || !ref.isValid()) {
-            return Optional.empty();
-        }
-        try {
-            Store<EntityStore> store = ref.getStore();
-            TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
-            if (transform != null) {
-                Vector3d pos = transform.getPosition();
-                return Optional.of(new Vector3f((float) pos.x(), (float) pos.y(), (float) pos.z()));
-            }
-        } catch (Exception e) {
-            plugin.getLogger().at(Level.FINE).log("Could not read player position: {0}", e.getMessage());
-        }
-        return Optional.empty();
+        String playerId = getSenderPlayerId(ctx);
+        Vector3f pos = plugin.getGameSession().getPlayerPosition(playerId);
+        return pos != null ? Optional.of(pos) : Optional.empty();
     }
 
     /**

@@ -861,6 +861,19 @@ public class GameSession {
     }
 
     /**
+     * Gets the last known world position for a player.
+     * Positions are updated periodically by the plugin's game loop, so this
+     * is safe to call from the command thread (unlike reading ECS directly).
+     *
+     * @param playerId the player's ID
+     * @return the last known position, or null if not tracked yet
+     */
+    @Nullable
+    public Vector3f getPlayerPosition(@Nonnull String playerId) {
+        return playerPositions.get(playerId);
+    }
+
+    /**
      * Handles a player moving from one zone to another through a door.
      * Updates zone tracking and re-syncs SpawnManager occupancy.
      */
