@@ -6,6 +6,19 @@ The **core game logic is fully implemented** with **259 passing unit tests**. Th
 
 ---
 
+## Project at a Glance
+
+| | |
+|---|---|
+| **Language** | Java |
+| **Build Tool** | Gradle (Kotlin DSL) |
+| **Tests** | 259+ JUnit 5 unit tests |
+| **Key Systems** | Spawn manager, round scaling, economy, power-ups, barriers, map zones |
+
+This plugin demonstrates robust backend game-system design: deterministic tick-based game loops, JSON persistence, UUID-based entity tracking, and comprehensive unit-test coverage for all core mechanics.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
